@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#13141f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="家計簿">
+<meta name="robots" content="noindex">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<title>家計簿</title>
+<style>
+  :root {
+    --bg: #13141f;
+    --surface: #1d1f30;
+    --surface2: #272a40;
+    --text: #f2f3fa;
+    --muted: #9aa0bd;
+    --violet: #8b7cf8;
+    --pink: #f472b6;
+    --teal: #2dd4bf;
+    --orange: #fbbf6d;
+    --red: #fb7185;
+    --green: #4ade80;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI", sans-serif;
+    font-size: 15px; line-height: 1.5;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  /* iPhoneのノッチ・Dynamic Island等のセーフエリアを考慮 */
+  .app { max-width: 480px; margin: 0 auto; min-height: 100dvh; padding-top: env(safe-area-inset-top, 0px); padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px)); }
+  button, input, select, .chip, .item.tappable { touch-action: manipulation; }
+  .screen { display: none; padding: 16px; }
+  .screen.active { display: block; }
+  button { font-family: inherit; }
+
+  /* ===== 月ナビ・見出し ===== */
+  .month { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+  .month button { background:var(--surface); border:none; color:var(--text); width:42px; height:42px; border-radius:50%; font-size:15px; cursor:pointer; }
+  .month .m { font-size:19px; font-weight:800; }
+  .page-title { font-size:19px; font-weight:800; text-align:center; padding:8px 0 16px; }
+
+  /* ===== ヒーローカード ===== */
+  .hero {
+    border-radius: 26px; padding: 22px;
+    background: linear-gradient(135deg, #8b7cf8 0%, #6366f1 45%, #2dd4bf 110%);
+    box-shadow: 0 12px 36px rgba(99,102,241,.35);
+    margin-bottom: 14px; color: #fff;
+  }
+  .hero .t { font-size:13px; opacity:.85; font-weight:600; }
+  .hero .v { font-size:38px; font-weight:900; letter-spacing:-0.01em; margin-bottom:14px; }
+  .hero .divider { height:1px; background:rgba(255,255,255,.25); margin-bottom:12px; }
+  .hero .credit-row { display:flex; align-items:center; justify-content:space-between; }
+  .hero .credit-row + .credit-row { margin-top:8px; }
+  .hero .credit-row .t { font-size:12px; }
+  .hero .credit-row .cv { font-size:20px; font-weight:800; }
+  .item.arch { opacity:.55; }
+
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:8px; }
+  .mini { background:var(--surface); border-radius:20px; padding:14px 16px; }
+  .mini .t { font-size:12px; color:var(--muted); font-weight:600; }
+  .mini .v { font-size:19px; font-weight:800; }
+  .v.inc { color:var(--green); } .v.exp { color:var(--red); }
+
+  .sec { font-size:13px; font-weight:800; margin:20px 6px 10px; display:flex; justify-content:space-between; align-items:center; }
+  .sec .more { font-size:11px; color:var(--violet); font-weight:700; cursor:pointer; }
+
+  /* ===== リスト ===== */
+  .list { display:flex; flex-direction:column; gap:8px; }
+  .item {
+    display:flex; align-items:center; gap:12px;
+    background:var(--surface); border-radius:18px; padding:12px 14px;
+  }
+  .item.tappable { cursor:pointer; }
+  .item.tappable:active { background:var(--surface2); }
+  .ic {
+    width:42px; height:42px; border-radius:14px; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; font-size:19px;
+    background:var(--surface2);
+  }
+  .item .body { flex:1; min-width:0; }
+  .item .n { font-weight:700; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .item .s { font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .item .a { font-weight:800; font-size:15px; flex-shrink:0; }
+  .a.exp { color:var(--red); } .a.inc { color:var(--green); } .a.trf { color:var(--teal); } .a.orange { color:var(--orange); }
+  .date-head { font-size:12px; font-weight:800; color:var(--muted); margin:16px 6px 8px; }
+  .empty { text-align:center; color:var(--muted); font-size:13px; padding:26px 0; }
+
+  /* ===== 入力フォーム ===== */
+  .seg { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:18px; }
+  .seg button { border:none; background:var(--surface); color:var(--muted); padding:12px 0; border-radius:16px; font-size:14px; font-weight:800; cursor:pointer; }
+  .seg button.on-exp { background:linear-gradient(135deg,#fb7185,#f472b6); color:#fff; box-shadow:0 6px 18px rgba(244,114,182,.35); }
+  .seg button.on-inc { background:linear-gradient(135deg,#34d399,#4ade80); color:#0b2a18; box-shadow:0 6px 18px rgba(74,222,128,.3); }
+  .seg button.on-trf { background:linear-gradient(135deg,#2dd4bf,#38bdf8); color:#062a2e; box-shadow:0 6px 18px rgba(45,212,191,.3); }
+
+  .fld { margin-bottom:18px; }
+  .fld label { display:block; font-size:12px; font-weight:800; color:var(--muted); margin:0 6px 8px; }
+  .fld input, .fld select {
+    width:100%; background:var(--surface); border:2px solid transparent; color:var(--text);
+    border-radius:16px; padding:13px 16px; font-size:16px; outline:none; appearance:none;
+  }
+  .fld input:focus, .fld select:focus { border-color:var(--violet); }
+  .fld select { background-image:linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position:calc(100% - 20px) 50%, calc(100% - 14px) 50%; background-size:6px 6px; background-repeat:no-repeat; }
+
+  .chips { display:flex; flex-wrap:wrap; gap:8px; }
+  .chip { background:var(--surface); color:var(--muted); border:none; border-radius:999px; padding:8px 15px; font-size:13px; font-weight:700; cursor:pointer; }
+  .chip.sel { background:linear-gradient(135deg,#8b7cf8,#6366f1); color:#fff; box-shadow:0 4px 14px rgba(139,124,248,.4); }
+
+  .g-title { font-size:11px; font-weight:800; color:var(--muted); margin:12px 6px 6px; }
+  .pay { display:flex; align-items:center; gap:10px; background:var(--surface); border-radius:16px; padding:9px 9px 9px 14px; margin-bottom:8px; }
+  .pay .em { font-size:17px; }
+  .pay .n { flex:1; font-size:14px; font-weight:700; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pay input { width:128px; background:var(--surface2); border:2px solid transparent; color:var(--text); border-radius:12px; padding:10px 12px; font-size:16px; text-align:right; outline:none; flex-shrink:0; }
+  .pay input:focus { border-color:var(--teal); }
+
+  .btn-main {
+    width:100%; padding:16px; border:none; border-radius:20px;
+    background:linear-gradient(135deg,#8b7cf8,#6366f1); color:#fff;
+    font-size:16px; font-weight:900; cursor:pointer; margin-top:8px;
+    box-shadow:0 10px 28px rgba(99,102,241,.4);
+  }
+  .btn-danger {
+    width:100%; padding:13px; border:none; border-radius:16px; margin-top:10px;
+    background:var(--surface); color:var(--red); font-size:14px; font-weight:800; cursor:pointer;
+  }
+  .btn-ghost {
+    width:100%; padding:13px; border:none; border-radius:16px; margin-bottom:8px;
+    background:var(--surface); color:var(--text); font-size:14px; font-weight:700; cursor:pointer; text-align:left; padding-left:16px;
+  }
+  .hint { font-size:11px; color:var(--muted); margin:6px 6px 0; }
+
+  /* ===== 設定 ===== */
+  .set-list { background:var(--surface); border-radius:18px; overflow:hidden; margin-bottom:10px; }
+  .set-item { display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:1px solid var(--surface2); }
+  .set-item:last-child { border-bottom:none; }
+  .set-item .grow { flex:1; min-width:0; }
+  .set-item .nm { font-weight:700; font-size:14px; }
+  .set-item .meta { color:var(--muted); font-size:11px; }
+  .badge { font-size:10px; font-weight:800; border-radius:6px; padding:2px 7px; }
+  .badge.exp { background:#3d2233; color:var(--pink); }
+  .badge.inc { background:#173a28; color:var(--green); }
+  .badge.off { background:#123a37; color:var(--teal); }
+  .icon-btn { background:var(--surface2); border:none; color:var(--muted); width:34px; height:34px; border-radius:10px; font-size:14px; cursor:pointer; flex-shrink:0; }
+  .add-form { background:var(--surface); border-radius:18px; padding:12px; margin-bottom:20px; display:flex; flex-direction:column; gap:8px; }
+  .add-form .row { display:flex; gap:8px; }
+  .add-form input, .add-form select {
+    background:var(--surface2); border:2px solid transparent; color:var(--text);
+    border-radius:12px; padding:10px 12px; font-size:14px; outline:none; width:100%; appearance:none;
+  }
+  .add-form input:focus, .add-form select:focus { border-color:var(--violet); }
+  .add-form button { background:linear-gradient(135deg,#8b7cf8,#6366f1); border:none; color:#fff; border-radius:12px; padding:10px 18px; font-size:13px; font-weight:800; cursor:pointer; flex-shrink:0; }
+  .ver { text-align:center; color:var(--muted); font-size:11px; padding:18px 0 6px; }
+
+  /* ===== モーダルダイアログ ===== */
+  .modal-overlay {
+    position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50;
+    display:flex; align-items:center; justify-content:center; padding:24px;
+    backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px);
+  }
+  .modal {
+    background:var(--surface); border-radius:22px; padding:20px; width:100%; max-width:340px;
+    max-height:80vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,.6);
+  }
+  .modal p { font-size:14px; font-weight:600; margin-bottom:6px; white-space:pre-line; }
+  .modal .md-title { font-size:16px; font-weight:800; margin-bottom:8px; }
+  .modal label { display:block; font-size:11px; font-weight:800; color:var(--muted); margin:10px 4px 4px; }
+  .modal input, .modal select { width:100%; background:var(--surface2); border:2px solid transparent; color:var(--text); border-radius:12px; padding:10px 12px; font-size:15px; outline:none; appearance:none; }
+  .modal input:focus, .modal select:focus { border-color:var(--violet); }
+  .modal .btns { display:flex; gap:8px; margin-top:18px; }
+  .modal .btns button { flex:1; padding:12px; border:none; border-radius:14px; font-size:14px; font-weight:800; cursor:pointer; }
+  .modal .btns .cancel { background:var(--surface2); color:var(--muted); }
+  .modal .btns .ok { background:linear-gradient(135deg,#8b7cf8,#6366f1); color:#fff; }
+  .modal .btns .ok.danger { background:linear-gradient(135deg,#fb7185,#f43f5e); }
+
+  /* ===== 下部ナビ ===== */
+  .tabbar { position:fixed; bottom:calc(10px + env(safe-area-inset-bottom, 0px)); left:0; right:0; z-index:10; pointer-events:none; }
+  .tabbar .inner {
+    pointer-events:auto; max-width:400px; margin:0 auto;
+    display:grid; grid-template-columns:1fr 1fr 1fr 1fr; align-items:center;
+    background:rgba(29,31,48,.92); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+    border-radius:26px; height:64px; padding:0 6px;
+    box-shadow:0 10px 30px rgba(0,0,0,.5);
+  }
+  .tab { background:none; border:none; color:var(--muted); cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:2px; font-size:10px; font-weight:800; }
+  .tab .ic2 { font-size:20px; }
+  .tab.active { color:var(--violet); }
+  .tab.add .ic2 {
+    width:46px; height:46px; border-radius:50%;
+    background:linear-gradient(135deg,#8b7cf8,#6366f1); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:26px;
+    margin-top:-24px; box-shadow:0 8px 22px rgba(139,124,248,.5);
+  }
+
+  /* ===== トースト ===== */
+  #toast {
+    position:fixed; left:50%; bottom:96px; transform:translateX(-50%) translateY(20px);
+    background:#2f3350; color:#fff; font-size:13px; font-weight:700;
+    padding:10px 20px; border-radius:999px; opacity:0; pointer-events:none;
+    transition:all .25s ease; z-index:100; box-shadow:0 8px 24px rgba(0,0,0,.4); white-space:nowrap;
+  }
+  #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="screen" id="scr-home"></div>
+  <div class="screen" id="scr-input"></div>
+  <div class="screen" id="scr-history"></div>
+  <div class="screen" id="scr-settings"></div>
+</div>
+
+<div class="tabbar"><div class="inner">
+  <button class="tab active" data-action="nav" data-scr="scr-home"><span class="ic2">🏠</span>ホーム</button>
+  <button class="tab add" data-action="nav" data-scr="scr-input"><span class="ic2">＋</span></button>
+  <button class="tab" data-action="nav" data-scr="scr-history"><span class="ic2">📋</span>履歴</button>
+  <button class="tab" data-action="nav" data-scr="scr-settings"><span class="ic2">⚙️</span>設定</button>
+</div></div>
+
+<div id="toast"></div>
+<input type="file" id="import-file" accept=".json,application/json" hidden>
+
+<script>
+"use strict";
+/* ================================================================
+   家計簿アプリ v1.0
+   - データは localStorage("kakeibo-data") に保存
+   - schemaVersion によるマイグレーションで将来のアップデートに対応
+   - 設定画面から JSON エクスポート / インポートで引き継ぎ可能
+   ================================================================ */
+
+const SEED_DATA = null; // 公開版: 個人データは含めない(設定→インポートで引き継ぎ)
+
+const STORAGE_KEY = "kakeibo-data";
+const APP_VERSION = "2.0";
+const SCHEMA_VERSION = 2;
+
+// SEED_DATA が null の場合(公開版)の初期データ
+const DEFAULT_DATA = {
+  schemaVersion: 2, settings: {},
+  accounts: [
+    { id:"cash",   name:"現金",           kind:"asset",  group:"現金",           initialBalance:0, sortOrder:1, archived:false },
+    { id:"paypay", name:"PayPay",         kind:"asset",  group:"PayPay",         initialBalance:0, sortOrder:2, archived:false },
+    { id:"bank1",  name:"銀行",           kind:"asset",  group:"銀行",           initialBalance:0, sortOrder:3, archived:false },
+    { id:"card1",  name:"クレジットカード", kind:"credit", group:"クレジットカード", initialBalance:0, sortOrder:4, archived:false, closingDay:31, payDay:27 }
+  ],
+  categories: [
+    { id:"food", name:"食費", type:"expense", sortOrder:1 }, { id:"daily", name:"日用品", type:"expense", sortOrder:2 },
+    { id:"transport", name:"交通費", type:"expense", sortOrder:3 }, { id:"fun", name:"娯楽", type:"expense", sortOrder:4 },
+    { id:"date", name:"デート・遊び", type:"expense", sortOrder:5 }, { id:"beauty", name:"美容室", type:"expense", sortOrder:6 },
+    { id:"fashion", name:"衣服", type:"expense", sortOrder:7 }, { id:"social", name:"交際費", type:"expense", sortOrder:8 },
+    { id:"health", name:"医療・健康", type:"expense", sortOrder:9 }, { id:"edu", name:"教育・資格", type:"expense", sortOrder:10 },
+    { id:"subsc", name:"サブスク", type:"expense", sortOrder:11 }, { id:"invest", name:"投資・貯金", type:"expense", sortOrder:12 },
+    { id:"other", name:"その他", type:"expense", sortOrder:13 }, { id:"salary", name:"給料", type:"income", sortOrder:14 },
+    { id:"pocket", name:"お小遣い・もらい物", type:"income", sortOrder:15 }, { id:"misc_in", name:"その他収入", type:"income", sortOrder:16 },
+    { id:"warikan", name:"割り勘", type:"income", offsetExpense:true, sortOrder:17 }
+  ],
+  transactions: []
+};
+
+/* ---------------- データ層 ---------------- */
+function migrate(d) {
+  if (!d.schemaVersion) d.schemaVersion = 1;
+  if (d.schemaVersion === 1) {
+    // v2: 設定・口座アーカイブ・クレカ締め日/支払日・割り勘カテゴリを追加
+    d.settings = d.settings || {};
+    d.accounts.forEach(a => {
+      if (a.archived === undefined) a.archived = false;
+      if (a.kind === "credit") {
+        if (!a.closingDay) a.closingDay = 31; // 31 = 月末締め
+        if (!a.payDay) a.payDay = 27;         // 翌月27日払い
+      }
+      // 解約済みの口座はアーカイブ(非表示)にする
+      if (a.id === "ufj_card" || a.id === "sbi_shinsei") a.archived = true;
+    });
+    if (!d.categories.some(c => c.id === "warikan")) {
+      d.categories.push({ id:"warikan", name:"割り勘", type:"income", offsetExpense:true,
+        sortOrder: Math.max(0, ...d.categories.map(c => c.sortOrder)) + 1 });
+    }
+    d.schemaVersion = 2;
+  }
+  // 将来のアップデートでデータ形式を変えるときは、ここに変換処理を追加する
+  return d;
+}
+function freshSeed() { return migrate(JSON.parse(JSON.stringify(SEED_DATA || DEFAULT_DATA))); }
+function loadData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) { const d = freshSeed(); persist(d); return d; }
+    return migrate(JSON.parse(raw));
+  } catch (e) {
+    console.error("データ読み込み失敗:", e);
+    return freshSeed();
+  }
+}
+function persist(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d || state)); }
+
+let state = loadData();
+
+/* ---------------- ユーティリティ ---------------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const yen = n => "¥" + Math.abs(Math.round(n)).toLocaleString("ja-JP");
+const uid = () => "tx-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+const WEEK = ["日","月","火","水","木","金","土"];
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+const acc = id => state.accounts.find(a => a.id === id);
+const cat = id => state.categories.find(c => c.id === id);
+
+/* ---------------- モーダルダイアログ ----------------
+   iOSのホーム画面アプリでは alert/confirm/prompt が効かないことがあるため、
+   すべて自前のモーダルで実装する */
+function dialog(opt) {
+  return new Promise(resolve => {
+    const ov = document.createElement("div");
+    ov.className = "modal-overlay";
+    ov.innerHTML = `<div class="modal">${opt.html}</div>`;
+    document.body.appendChild(ov);
+    const done = v => { ov.remove(); resolve(v); };
+    ov.addEventListener("click", e => {
+      if (e.target === ov) { done(opt.cancelValue); return; }
+      const b = e.target.closest("[data-md]");
+      if (b) opt.onAction(b.dataset.md, done, ov);
+    });
+    if (opt.onOpen) opt.onOpen(ov);
+    const inp = ov.querySelector("input[type=text],input[type=number]");
+    if (inp && opt.autofocus !== false) inp.focus();
+  });
+}
+function alertDialog(msg) {
+  return dialog({
+    html: `<p>${esc(msg)}</p><div class="btns"><button class="ok" data-md="ok">OK</button></div>`,
+    cancelValue: undefined, onAction: (a, done) => done()
+  });
+}
+function confirmDialog(msg, opt = {}) {
+  return dialog({
+    html: `<p>${esc(msg)}</p><div class="btns"><button class="cancel" data-md="c">キャンセル</button><button class="ok ${opt.danger ? "danger" : ""}" data-md="ok">${esc(opt.okText || "OK")}</button></div>`,
+    cancelValue: false, onAction: (a, done) => done(a === "ok")
+  });
+}
+function promptDialog(title, value = "", opt = {}) {
+  return dialog({
+    html: `<p>${esc(title)}</p><input id="md-input" type="${opt.type || "text"}" value="${esc(value)}"><div class="btns"><button class="cancel" data-md="c">キャンセル</button><button class="ok" data-md="ok">OK</button></div>`,
+    cancelValue: null,
+    onAction: (a, done, ov) => done(a === "ok" ? ov.querySelector("#md-input").value : null),
+    onOpen: ov => {
+      ov.querySelector("#md-input").addEventListener("keydown", e => {
+        if (e.key === "Enter") ov.querySelector('[data-md="ok"]').click();
+      });
+    }
+  });
+}
+// 口座の追加・編集モーダル(クレカは締め日・支払日も設定可能)
+function accountDialog(a) {
+  const groups = orderedGroups();
+  const isNew = !a;
+  const closeSel = sel => Array.from({length:30}, (_,i) => `<option value="${i+1}" ${sel===i+1?"selected":""}>${i+1}日</option>`).join("") + `<option value="31" ${(!sel||sel===31)?"selected":""}>月末</option>`;
+  const paySel = sel => Array.from({length:31}, (_,i) => `<option value="${i+1}" ${(sel||27)===i+1?"selected":""}>${i+1}日</option>`).join("");
+  return dialog({
+    html: `
+      <p class="md-title">${isNew ? "口座を追加" : "口座を編集"}</p>
+      <label>名前</label><input id="md-name" type="text" value="${a ? esc(a.name) : ""}" placeholder="例: 楽天銀行">
+      <label>グループ</label><input id="md-group" type="text" list="md-groups" value="${a ? esc(a.group) : ""}" placeholder="例: 銀行">
+      <datalist id="md-groups">${groups.map(g => `<option value="${esc(g)}">`).join("")}</datalist>
+      <label>種類</label>
+      <select id="md-kind">
+        <option value="asset" ${(!a || a.kind === "asset") ? "selected" : ""}>資産(現金・銀行・電子マネー)</option>
+        <option value="credit" ${a && a.kind === "credit" ? "selected" : ""}>クレジットカード</option>
+      </select>
+      <label>初期残高(円)</label><input id="md-init" type="number" value="${a ? (a.initialBalance || 0) : 0}">
+      <div id="md-credit" style="display:${a && a.kind === "credit" ? "block" : "none"}">
+        <label>締め日</label><select id="md-close">${closeSel(a && a.closingDay)}</select>
+        <label>支払日(締め日の翌月)</label><select id="md-pay">${paySel(a && a.payDay)}</select>
+      </div>
+      <div class="btns"><button class="cancel" data-md="c">キャンセル</button><button class="ok" data-md="ok">${isNew ? "追加" : "保存"}</button></div>`,
+    cancelValue: null, autofocus: false,
+    onOpen: ov => {
+      ov.querySelector("#md-kind").addEventListener("change", e => {
+        ov.querySelector("#md-credit").style.display = e.target.value === "credit" ? "block" : "none";
+      });
+    },
+    onAction: (act, done, ov) => {
+      if (act !== "ok") { done(null); return; }
+      const name = ov.querySelector("#md-name").value.trim();
+      if (!name) { toast("名前を入力してください"); return; }
+      done({
+        name,
+        group: ov.querySelector("#md-group").value.trim() || "その他",
+        kind: ov.querySelector("#md-kind").value,
+        initialBalance: Math.round(Number(ov.querySelector("#md-init").value)) || 0,
+        closingDay: Number(ov.querySelector("#md-close").value),
+        payDay: Number(ov.querySelector("#md-pay").value)
+      });
+    }
+  });
+}
+
+const CAT_ICONS = { food:"🍜", daily:"🧴", transport:"🚃", fun:"🎮", date:"💑", beauty:"💇", fashion:"👕", social:"🎁", health:"💊", edu:"📖", subsc:"📱", invest:"📈", other:"📦", salary:"💼", pocket:"💰", misc_in:"🪙" };
+const catIcon = c => (c && (c.icon || CAT_ICONS[c.id])) || "🏷️";
+const accIcon = a => !a ? "💼" : a.kind === "credit" ? "💳" : a.group === "現金" ? "💵" : a.group === "PayPay" ? "📱" : "🏦";
+
+/* ---------------- 集計 ---------------- */
+function balances() {
+  const b = {};
+  state.accounts.forEach(a => b[a.id] = a.initialBalance || 0);
+  state.transactions.forEach(t => {
+    for (const k in t.amounts) if (k in b) b[k] += t.amounts[k];
+  });
+  return b;
+}
+function totalAssets(b) { return state.accounts.filter(a => a.kind !== "credit").reduce((s,a) => s + b[a.id], 0); }
+function totalCredit(b) { return state.accounts.filter(a => a.kind === "credit").reduce((s,a) => s + b[a.id], 0); }
+
+// 取引の表示金額(支出=使った総額 / 収入=入った総額 / 振替=動かした額)
+function txAmount(t) {
+  const vals = Object.values(t.amounts);
+  if (!vals.length) return 0;
+  if (t.type === "transfer") return Math.max(...vals.map(Math.abs));
+  let s = 0;
+  for (const k in t.amounts) {
+    const a = acc(k), v = t.amounts[k];
+    const credit = a && a.kind === "credit";
+    if (t.type === "expense") s += credit ? v : -v;
+    else s += credit ? -v : v;
+  }
+  return s;
+}
+function monthTx(ym) {
+  return state.transactions
+    .filter(t => t.date && t.date.slice(0,7) === ym)
+    .sort((x,y) => y.date.localeCompare(x.date) || state.transactions.indexOf(y) - state.transactions.indexOf(x));
+}
+function monthSummary(ym) {
+  let inc = 0, exp = 0;
+  monthTx(ym).forEach(t => {
+    if (t.type === "income") {
+      const c = cat(t.categoryId);
+      if (c && c.offsetExpense) exp -= txAmount(t); // 割り勘: 収入ではなく支出から差し引く
+      else inc += txAmount(t);
+    }
+    else if (t.type === "expense") exp += txAmount(t);
+  });
+  return { inc, exp };
+}
+
+/* ---- クレカ請求の支払日別集計 ----
+   各カードの締め日(closingDay, 31=月末)と支払日(payDay, 締め月の翌月)から、
+   カード利用(+)を該当する支払日の請求に、引き落とし・返金(−)をその月の請求に割り当てる */
+function nextYM(y, m) { m++; if (m > 12) { m = 1; y++; } return { y, m }; }
+function lastDay(y, m) { return new Date(y, m, 0).getDate(); }
+function cardPayments() {
+  const map = {}; // "YYYY-MM-DD"(支払日) → 金額
+  state.accounts.filter(a => a.kind === "credit").forEach(a => {
+    const c = a.closingDay || 31, p = a.payDay || 27;
+    const bills = {}; // "YYYY-MM"(支払月) → 金額
+    let firstKey = null;
+    state.transactions.forEach(t => {
+      const v = t.amounts[a.id];
+      if (v === undefined || !t.date) return;
+      const [y, m, d] = t.date.split("-").map(Number);
+      let py, pm;
+      if (v > 0) { // 利用: 締め日までなら当月締め、過ぎたら翌月締め → 支払いは締め月の翌月
+        let cy = y, cm = m;
+        if (d > Math.min(c, lastDay(y, m))) ({ y: cy, m: cm } = nextYM(y, m));
+        ({ y: py, m: pm } = nextYM(cy, cm));
+      } else { // 引き落とし・返金: その月の請求に充当
+        py = y; pm = m;
+      }
+      const key = py + "-" + String(pm).padStart(2, "0");
+      bills[key] = (bills[key] || 0) + v;
+      if (!firstKey || key < firstKey) firstKey = key;
+    });
+    if (a.initialBalance) { // 初期残高は最初の請求(なければ来月の支払日)に計上
+      let k = firstKey;
+      if (!k) {
+        const t = todayStr();
+        const { y, m } = nextYM(Number(t.slice(0, 4)), Number(t.slice(5, 7)));
+        k = y + "-" + String(m).padStart(2, "0");
+      }
+      bills[k] = (bills[k] || 0) + a.initialBalance;
+    }
+    Object.keys(bills).forEach(k => {
+      if (!bills[k]) return;
+      const y = Number(k.slice(0, 4)), m = Number(k.slice(5, 7));
+      const date = k + "-" + String(Math.min(p, lastDay(y, m))).padStart(2, "0");
+      map[date] = (map[date] || 0) + bills[k];
+    });
+  });
+  return Object.keys(map).sort().filter(d => map[d] !== 0).map(d => ({ date: d, amount: map[d] }));
+}
+// 振替の「から→へ」ラベル
+function transferLabel(t) {
+  const from = [], to = [];
+  for (const k in t.amounts) {
+    const a = acc(k); if (!a) continue;
+    const v = t.amounts[k], credit = a.kind === "credit";
+    if ((v < 0 && !credit) || (v > 0 && credit)) from.push(a.name);
+    else to.push(a.name);
+  }
+  if (from.length && to.length) return from.join(",") + " → " + to.join(",");
+  return from.concat(to).join(", ");
+}
+function txSub(t, withDate) {
+  const parts = [];
+  if (withDate) parts.push(Number(t.date.slice(5,7)) + "/" + Number(t.date.slice(8,10)));
+  if (t.type === "transfer") { parts.push("振替"); parts.push(transferLabel(t)); }
+  else {
+    const c = cat(t.categoryId);
+    parts.push(c ? c.name : "未分類");
+    parts.push(Object.keys(t.amounts).map(k => { const a = acc(k); return a ? a.name : "?"; }).join(", "));
+  }
+  return parts.join(" ・ ");
+}
+function txIcon(t) { return t.type === "transfer" ? "🔁" : catIcon(cat(t.categoryId)); }
+function txAmountHtml(t) {
+  const v = txAmount(t);
+  if (t.type === "expense") return `<div class="a exp num">−${yen(v)}</div>`;
+  if (t.type === "income")  return `<div class="a inc num">+${yen(v)}</div>`;
+  return `<div class="a trf num">${yen(v)}</div>`;
+}
+function txItemHtml(t, withDate) {
+  return `<div class="item tappable" data-action="edit-tx" data-id="${t.id}">
+    <div class="ic">${txIcon(t)}</div>
+    <div class="body"><div class="n">${esc(t.name)}</div><div class="s">${esc(txSub(t, withDate))}</div></div>
+    ${txAmountHtml(t)}
+  </div>`;
+}
+
+/* ---------------- 画面状態 ---------------- */
+let viewMonth = todayStr().slice(0,7);
+let currentScreen = "scr-home";
+let inputType = "expense";     // 入力画面の種別
+let selectedCatId = null;      // 選択中カテゴリ
+let editingId = null;          // 編集中の取引ID(null=新規)
+
+function monthLabel(ym) { return Number(ym.slice(0,4)) + "年" + Number(ym.slice(5,7)) + "月"; }
+function shiftMonth(delta) {
+  let y = Number(viewMonth.slice(0,4)), m = Number(viewMonth.slice(5,7)) + delta;
+  if (m < 1) { m = 12; y--; } if (m > 12) { m = 1; y++; }
+  viewMonth = y + "-" + String(m).padStart(2,"0");
+  render();
+}
+function monthNavHtml() {
+  return `<div class="month">
+    <button data-action="month-prev">‹</button>
+    <div class="m">${monthLabel(viewMonth)}</div>
+    <button data-action="month-next">›</button>
+  </div>`;
+}
+
+/* ---------------- ホーム ---------------- */
+function renderHome() {
+  const b = balances();
+  const sum = monthSummary(viewMonth);
+  const mNum = Number(viewMonth.slice(5,7));
+  const recent = monthTx(viewMonth).slice(0, 6);
+  // アーカイブ済みの口座は残高が残っている場合のみ表示
+  const accRows = state.accounts.slice().sort((x,y) => x.sortOrder - y.sortOrder)
+    .filter(a => !a.archived || b[a.id] !== 0)
+    .map(a => {
+      const credit = a.kind === "credit";
+      return `<div class="item ${a.archived ? "arch" : ""}">
+        <div class="ic">${accIcon(a)}</div>
+        <div class="body"><div class="n">${esc(a.name)}</div>${credit ? '<div class="s">支払予定</div>' : a.archived ? '<div class="s">アーカイブ済</div>' : ""}</div>
+        <div class="a num ${credit ? "orange" : ""}">${b[a.id] < 0 ? "−" : ""}${yen(b[a.id])}</div>
+      </div>`;
+    }).join("");
+
+  // クレカ支払いを支払日別に表示(直近2回+それ以降)
+  const pays = cardPayments();
+  let creditHtml;
+  if (!pays.length) {
+    creditHtml = `<div class="credit-row"><div class="t">💳 クレカ支払予定額</div><div class="cv num">¥0</div></div>`;
+  } else {
+    const shown = pays.slice(0, 2);
+    const rest = pays.slice(2).reduce((s, x) => s + x.amount, 0);
+    creditHtml = shown.map(x => {
+      const m = Number(x.date.slice(5,7)), d = Number(x.date.slice(8,10));
+      return `<div class="credit-row"><div class="t">💳 ${m}月${d}日 支払い</div><div class="cv num">${x.amount < 0 ? "−" : ""}${yen(x.amount)}</div></div>`;
+    }).join("");
+    if (rest) creditHtml += `<div class="credit-row"><div class="t">💳 それ以降</div><div class="cv num">${rest < 0 ? "−" : ""}${yen(rest)}</div></div>`;
+  }
+
+  $("#scr-home").innerHTML = `
+    ${monthNavHtml()}
+    <div class="hero">
+      <div class="t">総資産(現在)</div>
+      <div class="v num">${totalAssets(b) < 0 ? "−" : ""}${yen(totalAssets(b))}</div>
+      <div class="divider"></div>
+      ${creditHtml}
+    </div>
+    <div class="row2">
+      <div class="mini"><div class="t">${mNum}月の収入</div><div class="v inc num">+${yen(sum.inc)}</div></div>
+      <div class="mini"><div class="t">${mNum}月の支出</div><div class="v exp num">−${yen(sum.exp)}</div></div>
+    </div>
+    <div class="sec">口座残高</div>
+    <div class="list">${accRows}</div>
+    <div class="sec">${mNum}月の記録 <span class="more" data-action="nav" data-scr="scr-history">すべて見る ›</span></div>
+    <div class="list">${recent.length ? recent.map(t => txItemHtml(t, true)).join("") : '<div class="empty">この月の記録はまだありません</div>'}</div>
+  `;
+}
+
+/* ---------------- 入力 ---------------- */
+function orderedGroups() {
+  const seen = [], sorted = state.accounts.slice().sort((x,y) => x.sortOrder - y.sortOrder);
+  sorted.forEach(a => { if (!seen.includes(a.group)) seen.push(a.group); });
+  return seen;
+}
+function renderInput() {
+  const editing = editingId ? state.transactions.find(t => t.id === editingId) : null;
+  const type = inputType;
+  const cats = state.categories.filter(c => c.type === (type === "income" ? "income" : "expense"))
+    .sort((x,y) => x.sortOrder - y.sortOrder);
+  if (!selectedCatId || !cats.some(c => c.id === selectedCatId)) selectedCatId = cats.length ? cats[0].id : null;
+
+  // 種別切替時は set-type ハンドラ側で日付・名前を復元する(新規表示では常にリセット)
+  const dateVal = editing ? editing.date : todayStr();
+  const nameVal = editing ? editing.name : "";
+
+  let bodyHtml = "";
+  if (type === "transfer") {
+    // 既存の複雑な振替(3口座以上/金額不一致)は生編集モード
+    let raw = false, fromId = "", toId = "", amtVal = "";
+    if (editing) {
+      const ent = Object.entries(editing.amounts);
+      if (ent.length === 2 && Math.abs(ent[0][1]) === Math.abs(ent[1][1])) {
+        for (const [k,v] of ent) {
+          const a = acc(k), credit = a && a.kind === "credit";
+          if ((v < 0 && !credit) || (v > 0 && credit)) fromId = k; else toId = k;
+        }
+        amtVal = Math.abs(ent[0][1]);
+        if (!fromId || !toId) raw = true;
+      } else raw = true;
+    }
+    if (raw) {
+      bodyHtml = `<div class="fld"><label>口座ごとの増減(マイナス=出 / プラス=入)</label>
+        ${state.accounts.slice().sort((x,y)=>x.sortOrder-y.sortOrder).filter(a => !a.archived || (editing && editing.amounts[a.id] !== undefined)).map(a => `
+          <div class="pay"><span class="em">${accIcon(a)}</span><div class="n">${esc(a.name)}</div>
+          <input type="number" id="raw-${a.id}" value="${editing.amounts[a.id] !== undefined ? editing.amounts[a.id] : ""}" placeholder="0"></div>`).join("")}
+        <div class="hint">※ この振替は複数口座にまたがるため、増減額を直接編集します。カードはプラス=支払予定が増える、です。</div>
+      </div>`;
+    } else {
+      const opts = sel => state.accounts.slice().sort((x,y)=>x.sortOrder-y.sortOrder)
+        .filter(a => !a.archived || a.id === sel)
+        .map(a => `<option value="${a.id}" ${a.id===sel?"selected":""}>${esc(a.name)}${a.kind==="credit"?" (カード)":""}</option>`).join("");
+      bodyHtml = `
+        <div class="fld"><label>移動元(お金が出る口座)</label><select id="trf-from">${opts(fromId)}</select></div>
+        <div class="fld"><label>移動先(お金が入る口座)</label><select id="trf-to">${opts(toId || (state.accounts[1] && state.accounts[1].id))}</select></div>
+        <div class="fld"><label>金額</label><input type="number" id="trf-amount" inputmode="numeric" placeholder="0" value="${amtVal}"></div>
+        <div class="hint">※ チャージ=銀行→PayPay など。クレカの引き落としは「銀行→カード」で入力すると支払予定額が減ります。</div>`;
+    }
+  } else {
+    const groups = orderedGroups();
+    const accInputs = groups.map(g => {
+      const rows = state.accounts
+        .filter(a => a.group === g && (!a.archived || (editing && editing.amounts[a.id] !== undefined)))
+        .sort((x,y)=>x.sortOrder-y.sortOrder).map(a => {
+          let v = "";
+          if (editing && editing.amounts[a.id] !== undefined) v = Math.abs(editing.amounts[a.id]);
+          return `<div class="pay"><span class="em">${accIcon(a)}</span><div class="n">${esc(a.name)}</div>
+            <input type="number" id="amt-${a.id}" inputmode="numeric" placeholder="¥0" value="${v}"></div>`;
+        }).join("");
+      return rows ? `<div class="g-title">${esc(g)}</div>${rows}` : "";
+    }).join("");
+    bodyHtml = `
+      <div class="fld"><label>カテゴリ</label><div class="chips">
+        ${cats.map(c => `<button class="chip ${c.id===selectedCatId?"sel":""}" data-action="set-cat" data-id="${c.id}">${catIcon(c)} ${esc(c.name)}</button>`).join("")}
+        <button class="chip" data-action="nav" data-scr="scr-settings">✎ 編集</button>
+      </div></div>
+      <div class="fld"><label>金額(使った口座に入力 ・ 複数可)</label>${accInputs}</div>`;
+  }
+
+  $("#scr-input").innerHTML = `
+    <div class="page-title">${editing ? "記録を編集" : "記録を追加"}</div>
+    <div class="seg">
+      <button class="${type==="expense"?"on-exp":""}" data-action="set-type" data-type="expense">支出</button>
+      <button class="${type==="income"?"on-inc":""}" data-action="set-type" data-type="income">収入</button>
+      <button class="${type==="transfer"?"on-trf":""}" data-action="set-type" data-type="transfer">振替</button>
+    </div>
+    <div class="fld"><label>日付</label><input type="date" id="in-date" value="${dateVal}"></div>
+    <div class="fld"><label>名前</label><input type="text" id="in-name" placeholder="例: 昼飯" value="${esc(nameVal)}"></div>
+    ${bodyHtml}
+    <button class="btn-main" data-action="save-tx">${editing ? "更新する" : "保存する"} ✓</button>
+    ${editing ? '<button class="btn-danger" data-action="delete-tx">この記録を削除</button>' : ""}
+  `;
+}
+
+function saveTx() {
+  const date = $("#in-date").value;
+  if (!date) { toast("日付を入力してください"); return; }
+  let name = $("#in-name").value.trim();
+  const amounts = {};
+
+  if (inputType === "transfer") {
+    if ($("#trf-from")) {
+      const fromId = $("#trf-from").value, toId = $("#trf-to").value;
+      const amt = Math.round(Number($("#trf-amount").value));
+      if (!amt || amt <= 0) { toast("金額を入力してください"); return; }
+      if (fromId === toId) { toast("移動元と移動先が同じです"); return; }
+      const f = acc(fromId), t = acc(toId);
+      amounts[fromId] = f.kind === "credit" ? amt : -amt;
+      amounts[toId]   = t.kind === "credit" ? -amt : amt;
+      if (!name) name = t.kind === "credit" ? "引き落とし" : "振替";
+    } else {
+      // 生編集モード
+      state.accounts.forEach(a => {
+        const el = $("#raw-" + a.id);
+        if (el && el.value !== "") { const v = Math.round(Number(el.value)); if (v) amounts[a.id] = v; }
+      });
+      if (!Object.keys(amounts).length) { toast("金額を入力してください"); return; }
+      if (!name) name = "振替";
+    }
+  } else {
+    state.accounts.forEach(a => {
+      const el = $("#amt-" + a.id);
+      if (el && el.value !== "") {
+        const v = Math.round(Math.abs(Number(el.value)));
+        if (v > 0) {
+          const credit = a.kind === "credit";
+          amounts[a.id] = inputType === "expense" ? (credit ? v : -v) : (credit ? -v : v);
+        }
+      }
+    });
+    if (!Object.keys(amounts).length) { toast("金額を入力してください"); return; }
+    if (!name) { const c = cat(selectedCatId); name = c ? c.name : (inputType === "income" ? "収入" : "支出"); }
+  }
+
+  if (editingId) {
+    const t = state.transactions.find(t => t.id === editingId);
+    t.date = date; t.name = name; t.type = inputType;
+    t.categoryId = inputType === "transfer" ? null : selectedCatId;
+    t.amounts = amounts;
+    toast("更新しました");
+  } else {
+    state.transactions.push({ id: uid(), date, name, type: inputType, categoryId: inputType === "transfer" ? null : selectedCatId, amounts });
+    toast("保存しました");
+  }
+  persist();
+  viewMonth = date.slice(0,7);
+  const dest = editingId ? "scr-history" : "scr-home";
+  editingId = null;
+  showScreen(dest);
+}
+async function deleteTx() {
+  const t = state.transactions.find(t => t.id === editingId);
+  if (!t) return;
+  if (!await confirmDialog(`「${t.name}」(${t.date})を削除しますか?`, { danger: true, okText: "削除" })) return;
+  state.transactions = state.transactions.filter(x => x.id !== editingId);
+  persist();
+  editingId = null;
+  toast("削除しました");
+  showScreen("scr-history");
+}
+function openEdit(id) {
+  const t = state.transactions.find(t => t.id === id);
+  if (!t) return;
+  editingId = id;
+  inputType = t.type;
+  selectedCatId = t.categoryId;
+  showScreen("scr-input", true);
+}
+
+/* ---------------- 履歴 ---------------- */
+function renderHistory() {
+  const txs = monthTx(viewMonth);
+  let html = monthNavHtml();
+  if (!txs.length) {
+    html += '<div class="empty">この月の記録はまだありません<br>「＋」から追加できます</div>';
+  } else {
+    const byDate = {};
+    txs.forEach(t => { (byDate[t.date] = byDate[t.date] || []).push(t); });
+    Object.keys(byDate).sort((a,b) => b.localeCompare(a)).forEach(dt => {
+      const d = new Date(dt + "T00:00:00");
+      html += `<div class="date-head">${d.getMonth()+1}月${d.getDate()}日(${WEEK[d.getDay()]})</div>`;
+      html += `<div class="list">${byDate[dt].map(t => txItemHtml(t, false)).join("")}</div>`;
+    });
+    html += '<div class="empty" style="padding:14px 0 0">記録をタップすると編集・削除できます</div>';
+  }
+  $("#scr-history").innerHTML = html;
+}
+
+/* ---------------- 設定 ---------------- */
+function renderSettings() {
+  const cats = state.categories.slice().sort((x,y) => x.sortOrder - y.sortOrder);
+  const accs = state.accounts.slice().sort((x,y) => x.sortOrder - y.sortOrder);
+  $("#scr-settings").innerHTML = `
+    <div class="page-title">設定</div>
+
+    <div class="sec">カテゴリ管理</div>
+    <div class="set-list">
+      ${cats.map(c => `<div class="set-item">
+        <span>${catIcon(c)}</span>
+        <div class="grow"><span class="nm">${esc(c.name)}</span></div>
+        <span class="badge ${c.offsetExpense ? "off" : c.type==="income" ? "inc" : "exp"}">${c.offsetExpense ? "割り勘" : c.type==="income" ? "収入" : "支出"}</span>
+        <button class="icon-btn" data-action="cat-rename" data-id="${c.id}">✎</button>
+        <button class="icon-btn" data-action="cat-del" data-id="${c.id}">🗑</button>
+      </div>`).join("")}
+    </div>
+    <div class="add-form">
+      <div class="row">
+        <input type="text" id="new-cat-name" placeholder="新しいカテゴリ名">
+        <select id="new-cat-type" style="width:150px">
+          <option value="expense">支出</option>
+          <option value="income">収入</option>
+          <option value="offset">割り勘(支出から差引)</option>
+        </select>
+        <button data-action="cat-add">追加</button>
+      </div>
+    </div>
+
+    <div class="sec">口座・支払い方法</div>
+    <div class="set-list">
+      ${accs.map(a => {
+        const meta = a.kind === "credit"
+          ? `${esc(a.group)} ・ ${a.closingDay === 31 ? "月末" : a.closingDay + "日"}締め ・ 翌月${a.payDay}日払い`
+          : `${esc(a.group)} ・ 初期残高 ${yen(a.initialBalance||0)}`;
+        return `<div class="set-item" ${a.archived ? 'style="opacity:.55"' : ""}>
+          <span>${accIcon(a)}</span>
+          <div class="grow"><span class="nm">${esc(a.name)}</span>
+            <div class="meta">${a.archived ? "🚫 使わない口座 ・ " : ""}${meta}</div></div>
+          <button class="icon-btn" data-action="acc-edit" data-id="${a.id}">✎</button>
+          <button class="icon-btn" data-action="acc-arch" data-id="${a.id}" title="使わない口座にする">${a.archived ? "↩" : "📦"}</button>
+          <button class="icon-btn" data-action="acc-del" data-id="${a.id}">🗑</button>
+        </div>`;
+      }).join("")}
+    </div>
+    <button class="btn-ghost" style="text-align:center" data-action="acc-add">＋ 口座を追加</button>
+    <div class="hint">※ 📦 = 使わなくなった口座を入力画面から非表示にします(過去の記録はそのまま)。クレカは ✎ から締め日・支払日を変更できます。</div>
+
+    <div class="sec">データ管理(アップデート時の引き継ぎ)</div>
+    <button class="btn-ghost" data-action="export">⬇ データをエクスポート(JSONファイル保存)</button>
+    <button class="btn-ghost" data-action="import">⬆ データをインポート(ファイルから復元)</button>
+    <button class="btn-ghost" style="color:var(--red)" data-action="reset">🗑 全データをリセット(初期データに戻す)</button>
+    <div class="hint">※ アプリ(HTMLファイル)を新しいバージョンに差し替えるときは、先にエクスポートしておき、新しいファイルでインポートすると確実に引き継げます。定期的なバックアップにもおすすめです。</div>
+
+    <div class="ver">家計簿アプリ v${APP_VERSION} ・ データ形式 schema v${state.schemaVersion} ・ 記録 ${state.transactions.length}件</div>
+  `;
+}
+
+/* ---- 設定の操作 ---- */
+async function catRename(id) {
+  const c = cat(id); if (!c) return;
+  const name = await promptDialog("カテゴリ名を変更", c.name);
+  if (name && name.trim()) { c.name = name.trim(); persist(); renderSettings(); toast("変更しました"); }
+}
+async function catDel(id) {
+  const c = cat(id); if (!c) return;
+  const used = state.transactions.filter(t => t.categoryId === id).length;
+  if (!await confirmDialog(`カテゴリ「${c.name}」を削除しますか?` + (used ? `\n(使用中の${used}件の記録は「未分類」になります)` : ""), { danger: true, okText: "削除" })) return;
+  state.categories = state.categories.filter(x => x.id !== id);
+  state.transactions.forEach(t => { if (t.categoryId === id) t.categoryId = null; });
+  persist(); renderSettings(); toast("削除しました");
+}
+function catAdd() {
+  const name = $("#new-cat-name").value.trim();
+  if (!name) { toast("カテゴリ名を入力してください"); return; }
+  const sel = $("#new-cat-type").value;
+  const c = { id: "cat-" + Date.now().toString(36), name, type: sel === "expense" ? "expense" : "income", sortOrder: Math.max(0, ...state.categories.map(c => c.sortOrder)) + 1 };
+  if (sel === "offset") c.offsetExpense = true; // 割り勘タイプ: 支出から差し引く収入
+  state.categories.push(c);
+  persist(); renderSettings(); toast("追加しました");
+}
+async function accEdit(id) {
+  const a = acc(id); if (!a) return;
+  const v = await accountDialog(a);
+  if (!v) return;
+  a.name = v.name; a.group = v.group; a.kind = v.kind; a.initialBalance = v.initialBalance;
+  if (a.kind === "credit") { a.closingDay = v.closingDay; a.payDay = v.payDay; }
+  persist(); renderSettings(); toast("保存しました");
+}
+function accArchive(id) {
+  const a = acc(id); if (!a) return;
+  a.archived = !a.archived;
+  persist(); renderSettings();
+  toast(a.archived ? `「${a.name}」を使わない口座にしました` : `「${a.name}」を元に戻しました`);
+}
+async function accDel(id) {
+  const a = acc(id); if (!a) return;
+  const used = state.transactions.filter(t => t.amounts[id] !== undefined).length;
+  if (used) {
+    if (await confirmDialog(`「${a.name}」は${used}件の記録で使われているため削除できません。\n代わりに「使わない口座」(アーカイブ)にしますか?\n過去の記録はそのまま残り、入力画面に表示されなくなります。`, { okText: "アーカイブする" })) {
+      a.archived = true; persist(); renderSettings(); toast("アーカイブしました");
+    }
+    return;
+  }
+  if (!await confirmDialog(`口座「${a.name}」を削除しますか?`, { danger: true, okText: "削除" })) return;
+  state.accounts = state.accounts.filter(x => x.id !== id);
+  persist(); renderSettings(); toast("削除しました");
+}
+async function accAdd() {
+  const v = await accountDialog(null);
+  if (!v) return;
+  const a = { id: "acc-" + Date.now().toString(36), name: v.name, kind: v.kind, group: v.group,
+    initialBalance: v.initialBalance, sortOrder: Math.max(0, ...state.accounts.map(a => a.sortOrder)) + 1, archived: false };
+  if (a.kind === "credit") { a.closingDay = v.closingDay; a.payDay = v.payDay; }
+  state.accounts.push(a);
+  persist(); renderSettings(); toast("追加しました");
+}
+
+/* ---- エクスポート / インポート / リセット ---- */
+function exportData() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "kakeibo-backup-" + todayStr() + ".json";
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  toast("エクスポートしました");
+}
+function importData(file) {
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const d = JSON.parse(reader.result);
+      if (!d || !Array.isArray(d.accounts) || !Array.isArray(d.categories) || !Array.isArray(d.transactions))
+        throw new Error("家計簿のバックアップファイルではありません");
+      if (!await confirmDialog(`現在のデータを置き換えます。\n読み込む記録: ${d.transactions.length}件\nよろしいですか?`, { okText: "インポート" })) return;
+      state = migrate(d);
+      persist();
+      toast("インポートしました");
+      render();
+    } catch (e) { alertDialog("インポートに失敗しました: " + e.message); }
+  };
+  reader.readAsText(file);
+}
+async function resetData() {
+  if (!await confirmDialog("全データを削除して初期状態に戻します。よろしいですか?", { danger: true, okText: "リセット" })) return;
+  if (!await confirmDialog("本当によろしいですか?この操作は取り消せません。\n(必要なら先にエクスポートしてください)", { danger: true, okText: "実行する" })) return;
+  localStorage.removeItem(STORAGE_KEY);
+  state = loadData();
+  toast("リセットしました");
+  render();
+}
+
+/* ---------------- ナビ・描画 ---------------- */
+function showScreen(id, keepEdit) {
+  if (id === "scr-input" && !keepEdit) {
+    editingId = null;
+    if (currentScreen !== "scr-input") { inputType = "expense"; selectedCatId = null; }
+  }
+  currentScreen = id;
+  document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === id));
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.scr === id));
+  render();
+  window.scrollTo(0, 0);
+}
+function render() {
+  if (currentScreen === "scr-home") renderHome();
+  else if (currentScreen === "scr-input") renderInput();
+  else if (currentScreen === "scr-history") renderHistory();
+  else renderSettings();
+}
+function toast(msg) {
+  const el = $("#toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove("show"), 2000);
+}
+
+/* ---------------- イベント ---------------- */
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-action]");
+  if (!el) return;
+  const act = el.dataset.action, id = el.dataset.id;
+  switch (act) {
+    case "nav": showScreen(el.dataset.scr); break;
+    case "month-prev": shiftMonth(-1); break;
+    case "month-next": shiftMonth(1); break;
+    case "set-type": {
+      const keep = { date: $("#in-date") && $("#in-date").value, name: $("#in-name") && $("#in-name").value };
+      inputType = el.dataset.type;
+      renderInput();
+      if (keep.date) $("#in-date").value = keep.date;
+      if (keep.name) $("#in-name").value = keep.name;
+      break;
+    }
+    case "set-cat":
+      selectedCatId = id;
+      document.querySelectorAll('[data-action="set-cat"]').forEach(c => c.classList.toggle("sel", c.dataset.id === id));
+      break;
+    case "save-tx": saveTx(); break;
+    case "delete-tx": deleteTx(); break;
+    case "edit-tx": openEdit(id); break;
+    case "cat-rename": catRename(id); break;
+    case "cat-del": catDel(id); break;
+    case "cat-add": catAdd(); break;
+    case "acc-edit": accEdit(id); break;
+    case "acc-arch": accArchive(id); break;
+    case "acc-del": accDel(id); break;
+    case "acc-add": accAdd(); break;
+    case "export": exportData(); break;
+    case "import": $("#import-file").click(); break;
+    case "reset": resetData(); break;
+  }
+});
+$("#import-file").addEventListener("change", e => {
+  if (e.target.files.length) importData(e.target.files[0]);
+  e.target.value = "";
+});
+
+/* ---------------- 起動 ---------------- */
+showScreen("scr-home");
+
+// PWA: Service Worker登録(https配信時のみ。オフラインでも起動できるようにする)
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  navigator.serviceWorker.register("./sw.js").catch(e => console.warn("SW登録失敗:", e));
+}
+</script>
+</body>
+</html>
