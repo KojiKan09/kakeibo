@@ -373,7 +373,7 @@
 const SEED_DATA = null; // 公開版: 個人データは含めない
 
 const STORAGE_KEY = "kakeibo-data";
-const APP_VERSION = "3.0";
+const APP_VERSION = "3.1";
 const SCHEMA_VERSION = 3;
 
 // SEED_DATA が null の場合(公開版)の初期データ
@@ -561,6 +561,30 @@ function accountDialog(a) {
   });
 }
 
+// クイックチップの追加・編集モーダル
+function quickItemDialog(q) {
+  const catSel = sel => `<option value="">自動(同じ名前の前回記録から)</option>` +
+    state.categories.filter(c => c.type === "expense").sort((a,b)=>a.sortOrder-b.sortOrder)
+      .map(c => `<option value="${c.id}" ${sel===c.id?"selected":""}>${esc(c.name)}</option>`).join("");
+  const accSel = sel => `<option value="">自動(同じ名前の前回記録から)</option>` +
+    state.accounts.filter(a => !a.archived).sort((a,b)=>a.sortOrder-b.sortOrder)
+      .map(a => `<option value="${a.id}" ${sel===a.id?"selected":""}>${esc(a.name)}</option>`).join("");
+  return dialog({
+    html: `<p class="md-title">${q ? "チップを編集" : "チップを追加"}</p>
+      <label>名前(ボタンに表示・記録名になります)</label><input id="md-qname" type="text" value="${q ? esc(q.name) : ""}" placeholder="例: 昼飯">
+      <label>カテゴリ</label><select id="md-qcat">${catSel(q && q.categoryId)}</select>
+      <label>支払い口座</label><select id="md-qacc">${accSel(q && q.accountId)}</select>
+      <div class="btns"><button class="cancel" data-md="c">キャンセル</button><button class="ok" data-md="ok">${q ? "保存" : "追加"}</button></div>`,
+    cancelValue: null, autofocus: false,
+    onAction: (a, done, ov) => {
+      if (a !== "ok") { done(null); return; }
+      const name = ov.querySelector("#md-qname").value.trim();
+      if (!name) { toast("名前を入力してください"); return; }
+      done({ name, categoryId: ov.querySelector("#md-qcat").value || null, accountId: ov.querySelector("#md-qacc").value || null });
+    }
+  });
+}
+
 /* ---------------- 集計 ---------------- */
 function balances() {
   const b = {};
@@ -721,6 +745,12 @@ function lastTxByName(name) {
   state.transactions.forEach(t => { if (t.name === name && (!best || t.date >= best.date)) best = t; });
   return best;
 }
+// クイックチップの一覧(カスタム設定があればそれ、なければ頻度順の自動)
+function quickItemsList() {
+  const custom = state.settings.quickItems;
+  if (Array.isArray(custom) && custom.length) return custom;
+  return frequentNames(5).map(n => ({ name: n, categoryId: null, accountId: null }));
+}
 function lastChargeRoute() {
   let best = null;
   state.transactions.forEach(t => {
@@ -746,6 +776,7 @@ let editingId = null;
 // クイック入力の状態
 let qMode = "expense";         // expense | charge | warikan
 let qName = null;
+let qCatId = null;             // チップで指定されたカテゴリ(null=自動)
 let qAmount = "";
 let qAccountId = null;
 
@@ -830,9 +861,12 @@ function renderHome() {
       </div>`;
   }
 
-  // クイックボタン(1つ目は最頻の記録名)
-  const topName = frequentNames(1)[0] || "支出";
-  const topIcon = (() => { const t = lastTxByName(topName); return t ? txIcon(t) : "🍜"; })();
+  // クイックボタン(1つ目はチップ設定 or 最頻の記録名)
+  const qItems = quickItemsList();
+  const top = qItems[0] || null;
+  const topBtn = top
+    ? `<button class="qbtn" data-action="q-item" data-idx="0"><span class="e">${top.categoryId && cat(top.categoryId) ? catIcon(cat(top.categoryId)) : (() => { const t = lastTxByName(top.name); return t ? txIcon(t) : "🍜"; })()}</span>${esc(top.name)}</button>`
+    : `<button class="qbtn" data-action="quick-blank"><span class="e">🍜</span>入力</button>`;
 
   // 口座残高
   const accRows = state.accounts.slice().sort((x,y) => x.sortOrder - y.sortOrder)
@@ -861,7 +895,7 @@ function renderHome() {
     ${dueHtml}
     <div class="sec-head">${ransomHtml("クイック")}<div class="en">QUICK ENTRY</div></div>
     <div class="quick">
-      <button class="qbtn" data-action="quick-name" data-name="${esc(topName)}"><span class="e">${topIcon}</span>${esc(topName)}</button>
+      ${topBtn}
       <button class="qbtn dark" data-action="quick-charge"><span class="e">⚡</span>チャージ</button>
       <button class="qbtn" data-action="quick-warikan"><span class="e">🤝</span>割り勘</button>
       <button class="qbtn dark" data-action="quick-blank"><span class="e">＋</span>その他</button>
@@ -896,20 +930,21 @@ function defaultQuickAccount(name) {
 }
 function renderQuick() {
   const b = balances();
-  const names = frequentNames(5);
-  if (qMode === "expense" && !qName) qName = names[0] || null;
+  const items = quickItemsList();
+  if (qMode === "expense" && !qName && items.length) { qName = items[0].name; qCatId = items[0].categoryId || null; }
   if (!qAccountId) qAccountId = defaultQuickAccount(qName);
 
-  const catId = qMode === "warikan" ? "warikan" : qMode === "charge" ? null : quickCategoryOf(qName || "");
+  const catId = qMode === "warikan" ? "warikan" : qMode === "charge" ? null : (qCatId || quickCategoryOf(qName || ""));
   const catLabel = qMode === "charge" ? "振替: チャージ(支出になりません)"
     : qMode === "warikan" ? "割り勘: 支出から差し引き"
-    : `カテゴリ: ${(cat(catId) || {name:"その他"}).name}(「${qName || "-"}」から自動)`;
+    : `カテゴリ: ${(cat(catId) || {name:"その他"}).name}${qCatId ? "(チップ設定)" : `(「${qName || "-"}」から自動)`}`;
 
   const chips = [
-    ...names.map(n => `<button class="chip ${qMode==="expense" && qName===n ? "sel" : ""}" data-action="q-name" data-name="${esc(n)}"><span>${esc(n)}</span></button>`),
+    ...items.map((it, i) => `<button class="chip ${qMode==="expense" && qName===it.name ? "sel" : ""}" data-action="q-item" data-idx="${i}"><span>${esc(it.name)}</span></button>`),
     `<button class="chip ${qMode==="charge" ? "sel" : ""}" data-action="quick-charge"><span>⚡ チャージ</span></button>`,
     `<button class="chip ${qMode==="warikan" ? "sel" : ""}" data-action="quick-warikan"><span>🤝 割り勘</span></button>`,
-    `<button class="chip" data-action="q-free"><span>✎ 自由入力</span></button>`
+    `<button class="chip" data-action="q-free"><span>✎ 自由入力</span></button>`,
+    `<button class="chip" data-action="nav" data-scr="scr-settings" style="opacity:.7"><span>⚙ チップ編集</span></button>`
   ].join("");
 
   let accHtml = "";
@@ -968,7 +1003,7 @@ function quickSave() {
     if (!qAccountId) { toast("口座を選んでください"); return; }
     const a = acc(qAccountId);
     const name = qName || "支出";
-    tx = { id: uid(), date, name, type: "expense", categoryId: quickCategoryOf(name),
+    tx = { id: uid(), date, name, type: "expense", categoryId: qCatId || quickCategoryOf(name),
       amounts: { [qAccountId]: a.kind === "credit" ? amt : -amt } };
   }
   state.transactions.push(tx);
@@ -1235,6 +1270,30 @@ function renderSettings() {
         </div>`).join("")}
     </div>
 
+    <div class="sec-head">${ransomHtml("クイック")}<div class="en">QUICK CHIPS</div></div>
+    ${Array.isArray(state.settings.quickItems) ? `
+    <div class="set-list">
+      ${state.settings.quickItems.map((q, i) => `<div class="set-item">
+        <span>${q.categoryId && cat(q.categoryId) ? catIcon(cat(q.categoryId)) : "🏷"}</span>
+        <div class="grow"><span class="nm">${esc(q.name)}</span>
+          <div class="meta">${q.categoryId && cat(q.categoryId) ? esc(cat(q.categoryId).name) : "カテゴリ自動"} ・ ${q.accountId && acc(q.accountId) ? esc(acc(q.accountId).name) : "口座自動"}</div></div>
+        <button class="icon-btn" data-action="quick-up" data-idx="${i}">↑</button>
+        <button class="icon-btn" data-action="quick-edit" data-idx="${i}">✎</button>
+        <button class="icon-btn" data-action="quick-del" data-idx="${i}">🗑</button>
+      </div>`).join("") || '<div class="set-item"><div class="grow"><div class="meta">チップがありません。「＋」で追加してください。</div></div></div>'}
+    </div>
+    <button class="btn-ghost" style="justify-content:center" data-action="quick-add">＋ チップを追加</button>
+    <button class="btn-ghost" data-action="quick-auto">🔄 自動(よく使う順)に戻す</button>`
+    : `
+    <div class="set-list">
+      <div class="set-item"><span>⚡</span>
+        <div class="grow"><span class="nm">自動モード</span>
+          <div class="meta">よく使う支出の記録名を自動表示中: ${esc(frequentNames(5).join(" / ") || "(記録なし)")}</div></div>
+      </div>
+    </div>
+    <button class="btn-ghost" style="justify-content:center" data-action="quick-customize">✎ チップを自分で決める(カスタムに切替)</button>`}
+    <div class="hint">※ ホームとクイック入力に表示されるボタンの設定です。1番目のチップはホームのクイックボタンになります。</div>
+
     <div class="sec-head">${ransomHtml("カテゴリ")}<div class="en">CATEGORY</div></div>
     <div class="set-list">
       ${cats.map(c => `<div class="set-item">
@@ -1406,7 +1465,7 @@ async function resetData() {
 function showScreen(id, keepEdit) {
   if (id === "scr-input" && !keepEdit) {
     editingId = null;
-    if (currentScreen !== "scr-input") { inputMode = "quick"; inputType = "expense"; selectedCatId = null; qAmount = ""; }
+    if (currentScreen !== "scr-input") { inputMode = "quick"; inputType = "expense"; selectedCatId = null; qAmount = ""; qCatId = null; }
   }
   currentScreen = id;
   document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === id));
@@ -1448,11 +1507,19 @@ document.addEventListener("click", async e => {
       qMode = "warikan"; qAccountId = qAccountId || defaultQuickAccount(null); inputMode = "quick"; editingId = null;
       if (currentScreen === "scr-input") renderQuick(); else showScreen("scr-input", true);
       break;
-    case "quick-blank": qMode = "expense"; qName = null; qAmount = ""; inputMode = "quick"; editingId = null; showScreen("scr-input", true); break;
-    case "q-name": qMode = "expense"; qName = el.dataset.name; qAccountId = defaultQuickAccount(qName); renderQuick(); break;
+    case "quick-blank": qMode = "expense"; qName = null; qCatId = null; qAmount = ""; inputMode = "quick"; editingId = null; showScreen("scr-input", true); break;
+    case "q-item": {
+      const it = quickItemsList()[Number(el.dataset.idx)];
+      if (!it) break;
+      qMode = "expense"; qName = it.name; qCatId = it.categoryId || null;
+      qAccountId = (it.accountId && acc(it.accountId) && !acc(it.accountId).archived) ? it.accountId : defaultQuickAccount(it.name);
+      if (currentScreen === "scr-input") renderQuick();
+      else { inputMode = "quick"; editingId = null; showScreen("scr-input", true); }
+      break;
+    }
     case "q-free": {
       const n = await promptDialog("記録の名前を入力", "");
-      if (n && n.trim()) { qMode = "expense"; qName = n.trim(); qAccountId = defaultQuickAccount(qName); renderQuick(); }
+      if (n && n.trim()) { qMode = "expense"; qName = n.trim(); qCatId = null; qAccountId = defaultQuickAccount(qName); renderQuick(); }
       break;
     }
     case "q-acc": qAccountId = id; renderQuick(); break;
@@ -1483,6 +1550,40 @@ document.addEventListener("click", async e => {
     case "delete-tx": deleteTx(); break;
     case "edit-tx": openEdit(id); break;
     /* --- 設定 --- */
+    case "quick-customize":
+      state.settings.quickItems = frequentNames(5).map(n => ({ name: n, categoryId: null, accountId: null }));
+      persist(); renderSettings(); toast("カスタムに切り替えました");
+      break;
+    case "quick-auto":
+      if (await confirmDialog("チップを自動(よく使う順)に戻しますか?\nカスタム設定は消えます。")) {
+        state.settings.quickItems = null; persist(); renderSettings(); toast("自動に戻しました");
+      }
+      break;
+    case "quick-add": {
+      const v = await quickItemDialog(null);
+      if (v) {
+        if (!Array.isArray(state.settings.quickItems)) state.settings.quickItems = [];
+        state.settings.quickItems.push(v);
+        persist(); renderSettings(); toast("追加しました");
+      }
+      break;
+    }
+    case "quick-edit": {
+      const i = Number(el.dataset.idx);
+      const v = await quickItemDialog(state.settings.quickItems[i]);
+      if (v) { state.settings.quickItems[i] = v; persist(); renderSettings(); toast("保存しました"); }
+      break;
+    }
+    case "quick-del": {
+      state.settings.quickItems.splice(Number(el.dataset.idx), 1);
+      persist(); renderSettings(); toast("削除しました");
+      break;
+    }
+    case "quick-up": {
+      const i = Number(el.dataset.idx);
+      if (i > 0) { const arr = state.settings.quickItems; [arr[i-1], arr[i]] = [arr[i], arr[i-1]]; persist(); renderSettings(); }
+      break;
+    }
     case "budget-month": budgetMonth(); break;
     case "budget-cat": budgetCat(id); break;
     case "cat-rename": catRename(id); break;
