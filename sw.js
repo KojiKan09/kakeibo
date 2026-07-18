@@ -1,6 +1,6 @@
 // 家計簿アプリ Service Worker
 // ネットワーク優先(更新をすぐ反映)+ オフライン時はキャッシュから起動
-const CACHE = "kakeibo-v2.0";
+const CACHE = "kakeibo-v3.0";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", e => {
