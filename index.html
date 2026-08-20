@@ -14,6 +14,7 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://api.anthropic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Reggae+One&family=Bangers&display=swap" rel="stylesheet">
 <title>家計簿</title>
 <style>
@@ -109,18 +110,34 @@
   .due .ok.ng { background:#000; color:var(--red2); box-shadow:0 0 0 2px #fff; }
   .due .next { font-size:10px; opacity:.9; font-weight:800; margin-top:6px; border-top:2px dashed rgba(255,255,255,.4); padding-top:5px; }
 
-  .quick { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:0 2px 6px; }
+  .quick { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:0 2px 6px; }
+  /* 切り抜いた紙を白黒交互に貼った見た目(v3.0 からの意匠)。
+     .dark はホームの並び順で1つおきに付ける(renderHome 側で計算) */
   .qbtn { position:relative; background:var(--white); color:#000; border:none; cursor:pointer;
-    font-family:'Reggae One', sans-serif; font-size:12px; padding:13px 2px 9px;
+    font-family:'Reggae One', sans-serif; font-size:11px; padding:11px 4px 8px;
     clip-path:polygon(4% 8%, 96% 0, 100% 88%, 92% 100%, 2% 96%);
-    box-shadow:4px 4px 0 var(--red); transition:transform .12s; animation:pop .3s both; }
-  .qbtn:nth-child(1){ transform:rotate(-3deg); animation-delay:.18s }
-  .qbtn:nth-child(2){ transform:rotate(2deg);  animation-delay:.22s }
-  .qbtn:nth-child(3){ transform:rotate(-2deg); animation-delay:.26s }
-  .qbtn:nth-child(4){ transform:rotate(3deg);  animation-delay:.3s }
+    box-shadow:4px 4px 0 var(--red); transition:transform .12s; }
+  /* 傾きは4個ごとに繰り返す(チップ数は可変)。
+     pop は初回描画のときだけ再生する — 記録するたびに全部が跳ねると目がチカチカする */
+  .qbtn:nth-child(4n+1){ transform:rotate(-3deg) }
+  .qbtn:nth-child(4n+2){ transform:rotate(2deg)  }
+  .qbtn:nth-child(4n+3){ transform:rotate(-2deg) }
+  .qbtn:nth-child(4n)  { transform:rotate(3deg)  }
+  .quick.anim .qbtn { animation:pop .3s both; }
+  .quick.anim .qbtn:nth-child(4n+1){ animation-delay:.18s }
+  .quick.anim .qbtn:nth-child(4n+2){ animation-delay:.22s }
+  .quick.anim .qbtn:nth-child(4n+3){ animation-delay:.26s }
+  .quick.anim .qbtn:nth-child(4n)  { animation-delay:.3s  }
   .qbtn:active { transform:scale(1.08); }
-  .qbtn .e { display:block; font-size:18px; }
-  .qbtn.dark { background:#000; color:var(--white); box-shadow:4px 4px 0 var(--red), 0 0 0 2px var(--white) inset; }
+  .qbtn .e { display:block; font-size:16px; }
+  .qbtn > span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .qbtn .amt { font-size:12px; font-style:italic; color:var(--red); margin-top:1px; }
+  .qbtn .amt.none { color:#8a8a8a; font-size:10px; font-style:normal; }
+  .qbtn.dark { background:#000; color:var(--white);
+    box-shadow:4px 4px 0 var(--red), 0 0 0 2px var(--white) inset; }
+  .qbtn.dark .amt { color:var(--red2); }
+  .qbtn.dark .amt.none { color:var(--gray); }
+  .btn-ghost.wide { display:block; width:calc(100% - 4px); margin:0 2px 6px; }
 
   .asset-bar { display:flex; align-items:center; justify-content:space-between;
     background:#000; border:3px solid var(--white); transform:skew(-6deg);
@@ -131,6 +148,10 @@
   .asset-bar .t .en { font-size:9px; color:var(--gray); display:block; letter-spacing:.25em; }
   .asset-bar .v { font-size:23px; }
   .asset-bar .v .yen { color:var(--red2); display:inline-block; transform:skew(-12deg); }
+  /* 総資産・貯蓄は内訳なので小さく */
+  .asset-sub { display:flex; justify-content:space-between; gap:12px;
+    margin:0 10px 4px; font-size:11px; font-weight:700; color:var(--gray); }
+  .asset-sub b { color:var(--white); font-size:13px; margin-left:3px; }
 
   /* 口座残高(名札パネル) */
   .accs { margin:0 2px; }
@@ -146,6 +167,8 @@
   .acc .an { flex:1; font-size:13px; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
     font-family:'Reggae One', "Hiragino Sans", sans-serif; }
   .acc .an .tag { font-size:9px; background:var(--red); color:#fff; padding:1px 6px; margin-left:7px; display:inline-block; transform:skew(-10deg); }
+  /* 支払予定(赤)と区別する。詳細度を .acc .an .tag に合わせないと上書きできない */
+  .acc .an .tag.sav { background:var(--cyan); color:#000; }
   .acc .av { font-size:17px; flex-shrink:0; }
   .acc.credit { border-left-color:var(--red); }
   .acc.credit .av { color:var(--red2); }
@@ -325,6 +348,56 @@
     padding:9px 22px; opacity:0; pointer-events:none; transition:all .22s ease; z-index:100;
     box-shadow:4px 4px 0 #000, 5px 5px 0 rgba(255,255,255,.3); white-space:nowrap; }
   #toast.show { opacity:1; transform:translateX(-50%) translateY(0) skew(-6deg); }
+  /* 取り消しボタン付きトースト: pointer-events を戻さないとボタンが押せない */
+  /* pointer-events はボタンにだけ戻す。コンテナ全体を auto にすると、
+     トーストの帯が5秒間その下のタップを全部食べてしまう */
+  #toast.act { white-space:normal; width:calc(100vw - 28px);
+    text-align:left; display:flex; align-items:center; gap:10px; }
+  #toast .t-msg { flex:1; min-width:0; line-height:1.5; }
+  #toast .t-act { pointer-events:auto; background:#000; color:var(--white); border:2px solid var(--white);
+    font-family:'Reggae One', sans-serif; font-size:12px; padding:3px 12px;
+    transform:skew(6deg); flex:none; cursor:pointer; }
+  #toast .t-act:active { background:var(--white); color:#000; }
+
+  /* ===== v4: 割り勘の元記録カード ===== */
+  .refcard { background:var(--panel2); margin:0 2px 10px; padding:12px 14px;
+    clip-path:polygon(0 0, 100% 4px, 99% 100%, 6px 96%); box-shadow:4px 4px 0 #000; }
+  .refcard.none { opacity:.85; }
+  .refcard .rt { display:flex; align-items:baseline; gap:8px; }
+  .refcard .rn { font-family:'Reggae One', sans-serif; font-size:14px; flex:1; min-width:0;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .refcard .rd { font-size:11px; color:var(--gray); font-weight:800; }
+  .refcard .rv { display:flex; align-items:baseline; gap:10px; margin-top:4px; flex-wrap:wrap; }
+  .refcard .rv .num { font-size:18px; }
+  .refcard .rs { font-size:11px; color:var(--gray); font-weight:700; }
+  .refcard .rs b { color:var(--white); }
+  .refcard .rb { display:flex; gap:8px; margin-top:10px; }
+  .refcard .rb .btn-ghost { flex:1; justify-content:center; margin:0; }
+
+  /* ===== v4: 元記録ピッカー ===== */
+  .wlist { max-height:46vh; overflow-y:auto; margin:10px 0; }
+  .wrow { display:grid; grid-template-columns:1fr auto; gap:2px 10px; padding:9px 10px; cursor:pointer;
+    border-bottom:1px solid #2a2a2a; }
+  .wrow:active { background:var(--panel2); }
+  .wrow .wn { font-weight:900; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .wrow .wv { font-size:15px; text-align:right; }
+  .wrow .wm { font-size:10px; color:var(--gray); font-weight:700; }
+  .wrow .wr { font-size:10px; color:var(--red2); font-weight:800; text-align:right; }
+
+  /* ===== v4: 履歴行のクイック登録ボタン ===== */
+  .tx-q { background:transparent; border:2px solid #3a3a3a; color:var(--white); flex-shrink:0;
+    width:30px; height:30px; font-size:13px; cursor:pointer; margin-left:2px; }
+  .tx-q:active { background:var(--red); border-color:var(--red); }
+  .tx .tappable { cursor:pointer; }
+
+  /* ===== v4: クイック登録トグル / レシート ===== */
+  .btn-ghost.qreg.on { border-color:var(--red); color:var(--red2); }
+  .rcp-banner { font-size:12px; font-weight:700; line-height:1.6;
+    border-left:4px solid var(--cyan); margin:0 2px 10px; }
+  .rcp-spin { width:44px; height:44px; margin:0 auto; background:var(--red);
+    clip-path:polygon(50% 0%,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);
+    animation:spin 1.1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
 
   /* ===== アニメーション ===== */
   @keyframes slam { from { opacity:0; transform:translateX(-40px) skew(-16deg) scale(1.1); } to { opacity:1; } }
@@ -361,25 +434,31 @@
 
 <div id="toast"></div>
 <input type="file" id="import-file" accept=".json,application/json" hidden>
+<!-- capture="environment" は付けない。iOS で指定するとカメラ直起動になり、
+     フォトライブラリから選べなくなる(後でまとめて入力する使い方ができない) -->
+<input type="file" id="receipt-file" accept="image/*" hidden>
 
 <script>
 "use strict";
 /* ================================================================
-   家計簿アプリ v3.0 — ペルソナ5スタイル
-   - localStorage("kakeibo-data") / schemaVersion 3
+   家計簿アプリ v4.0 — ペルソナ5スタイル
+   - localStorage("kakeibo-data") / schemaVersion 5
    - エクスポート / インポートで引き継ぎ
+   - APIキーだけは localStorage("kakeibo-apikey") に分離して保存する。
+     state に入れるとエクスポートしたJSONに平文で載ってしまうため。
    ================================================================ */
 
 const SEED_DATA = null; // 公開版: 個人データは含めない
 
 const STORAGE_KEY = "kakeibo-data";
-const APP_VERSION = "3.1";
-const SCHEMA_VERSION = 3;
+const APIKEY_KEY = "kakeibo-apikey";
+const APP_VERSION = "4.0";
+const SCHEMA_VERSION = 5;
 
 // SEED_DATA が null の場合(公開版)の初期データ
 const DEFAULT_DATA = {
-  schemaVersion: 3,
-  settings: { monthlyBudget: 60000, categoryBudgets: {} },
+  schemaVersion: 5,
+  settings: { monthlyBudget: 60000, categoryBudgets: {}, quickItems: null, receiptRes: "high" },
   accounts: [
     { id:"cash",   name:"現金",           kind:"asset",  group:"現金",           initialBalance:0, sortOrder:1, archived:false },
     { id:"paypay", name:"PayPay",         kind:"asset",  group:"PayPay",         initialBalance:0, sortOrder:2, archived:false },
@@ -434,6 +513,31 @@ function migrate(d) {
     if (smcc && !smcc.payFromId && d.accounts.some(a => a.id === "sumishin")) smcc.payFromId = "sumishin";
     d.schemaVersion = 3;
   }
+  if (d.schemaVersion === 3) {
+    // v4: クイックチップの金額 / 割り勘の元記録参照
+    d.settings = d.settings || {};
+    // 既存チップは金額なし(=タップで詳細入力が開く)。推測で金額を入れない
+    if (Array.isArray(d.settings.quickItems))
+      d.settings.quickItems.forEach(q => { if (q.amount === undefined) q.amount = null; });
+    if (d.settings.receiptRes === undefined) d.settings.receiptRes = "high";
+    // 既存の割り勘レコードは元記録が分からないので null のまま。
+    // offsetCategoryId が null なら「未分類から差し引く」= v3 と同じ集計結果になる
+    const offsetIds = d.categories.filter(c => c.offsetExpense).map(c => c.id);
+    d.transactions.forEach(t => {
+      if (t.type === "income" && offsetIds.indexOf(t.categoryId) >= 0) {
+        if (t.refTxId === undefined) t.refTxId = null;
+        if (t.offsetCategoryId === undefined) t.offsetCategoryId = null;
+      }
+    });
+    d.schemaVersion = 4;
+  }
+  if (d.schemaVersion === 4) {
+    // v5: 資産口座を「メイン(使えるお金)」と「貯蓄(手をつけない)」に分ける
+    d.accounts.forEach(a => {
+      if (a.kind !== "credit" && a.savings === undefined) a.savings = false;
+    });
+    d.schemaVersion = 5;
+  }
   // 将来のアップデートでデータ形式を変えるときは、ここに変換処理を追加する
   return d;
 }
@@ -448,7 +552,23 @@ function loadData() {
     return freshSeed();
   }
 }
-function persist(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d || state)); }
+function persist(d) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(d || state));
+  } catch (e) {
+    // 容量超過などで保存できないと、画面上は記録できたように見えるのに
+    // リロードで消える。黙って失敗させない
+    console.error("保存失敗:", e);
+    alertDialog("保存できませんでした。\n端末の空き容量が不足している可能性があります。\n設定 > データ からエクスポートして退避してください。");
+  }
+}
+
+/* APIキーは state と別に保存する(エクスポートJSONに載せないため) */
+function getApiKey() { try { return localStorage.getItem(APIKEY_KEY) || ""; } catch (e) { return ""; } }
+function setApiKey(v) {
+  try { v ? localStorage.setItem(APIKEY_KEY, v) : localStorage.removeItem(APIKEY_KEY); }
+  catch (e) { console.error(e); }
+}
 
 let state = loadData();
 
@@ -465,6 +585,10 @@ function todayStr() {
 }
 const acc = id => state.accounts.find(a => a.id === id);
 const cat = id => state.categories.find(c => c.id === id);
+// 割り勘カテゴリ。"warikan" をハードコードすると、ユーザーが設定でそれを消したときに
+// 割り勘が「ただの収入」として計上されてしまう(残高は合うが予算がズレる)
+const warikanCat = () => state.categories.find(c => c.offsetExpense) || null;
+const warikanCatId = () => { const c = warikanCat(); return c ? c.id : "warikan"; };
 
 const CAT_ICONS = { food:"🍜", daily:"🧴", transport:"🚃", fun:"🎮", date:"💑", beauty:"💇", fashion:"👕", social:"🎁", health:"💊", edu:"📖", subsc:"📱", invest:"📈", other:"📦", salary:"💼", pocket:"💰", misc_in:"🪙", warikan:"🤝" };
 const catIcon = c => (c && (c.icon || CAT_ICONS[c.id])) || "🏷";
@@ -481,10 +605,10 @@ function dialog(opt) {
     ov.addEventListener("click", e => {
       if (e.target === ov) { done(opt.cancelValue); return; }
       const b = e.target.closest("[data-md]");
-      if (b) opt.onAction(b.dataset.md, done, ov);
+      if (b) opt.onAction(b.dataset.md, done, ov, b);   // b: 押された要素(data-* を読むため)
     });
     if (opt.onOpen) opt.onOpen(ov);
-    const inp = ov.querySelector("input[type=text],input[type=number]");
+    const inp = ov.querySelector("input[type=text],input[type=number],input[type=password]");
     if (inp && opt.autofocus !== false) inp.focus();
   });
 }
@@ -532,6 +656,14 @@ function accountDialog(a) {
         <option value="credit" ${a && a.kind === "credit" ? "selected" : ""}>クレジットカード</option>
       </select>
       <label>初期残高(円)</label><input id="md-init" type="number" value="${a ? (a.initialBalance || 0) : 0}">
+      <div id="md-asset" style="display:${(!a || a.kind === "asset") ? "block" : "none"}">
+        <label>区分</label>
+        <select id="md-savings">
+          <option value="main" ${!(a && a.savings) ? "selected" : ""}>メイン(ふだん使うお金)</option>
+          <option value="savings" ${a && a.savings ? "selected" : ""}>貯蓄(使えるお金から除く)</option>
+        </select>
+        <div class="hint">貯蓄にすると、ホームの「使えるお金」から差し引かれます。総資産には含まれます。</div>
+      </div>
       <div id="md-credit" style="display:${a && a.kind === "credit" ? "block" : "none"}">
         <label>締め日</label><select id="md-close">${closeSel(a && a.closingDay)}</select>
         <label>支払日(締め日の翌月)</label><select id="md-pay">${paySel(a && a.payDay)}</select>
@@ -541,7 +673,9 @@ function accountDialog(a) {
     cancelValue: null, autofocus: false,
     onOpen: ov => {
       ov.querySelector("#md-kind").addEventListener("change", e => {
-        ov.querySelector("#md-credit").style.display = e.target.value === "credit" ? "block" : "none";
+        const credit = e.target.value === "credit";
+        ov.querySelector("#md-credit").style.display = credit ? "block" : "none";
+        ov.querySelector("#md-asset").style.display = credit ? "none" : "block";
       });
     },
     onAction: (act, done, ov) => {
@@ -553,6 +687,7 @@ function accountDialog(a) {
         group: ov.querySelector("#md-group").value.trim() || "その他",
         kind: ov.querySelector("#md-kind").value,
         initialBalance: Math.round(Number(ov.querySelector("#md-init").value)) || 0,
+        savings: ov.querySelector("#md-savings").value === "savings",
         closingDay: Number(ov.querySelector("#md-close").value),
         payDay: Number(ov.querySelector("#md-pay").value),
         payFromId: ov.querySelector("#md-from").value || null
@@ -572,6 +707,8 @@ function quickItemDialog(q) {
   return dialog({
     html: `<p class="md-title">${q ? "チップを編集" : "チップを追加"}</p>
       <label>名前(ボタンに表示・記録名になります)</label><input id="md-qname" type="text" value="${q ? esc(q.name) : ""}" placeholder="例: 昼飯">
+      <label>金額(円)</label><input id="md-qamt" type="number" inputmode="numeric" value="${q && q.amount ? q.amount : ""}" placeholder="例: 600">
+      <div class="hint">空欄にすると、タップしたとき詳細入力が開きます(金額が毎回変わるものはこちら)</div>
       <label>カテゴリ</label><select id="md-qcat">${catSel(q && q.categoryId)}</select>
       <label>支払い口座</label><select id="md-qacc">${accSel(q && q.accountId)}</select>
       <div class="btns"><button class="cancel" data-md="c">キャンセル</button><button class="ok" data-md="ok">${q ? "保存" : "追加"}</button></div>`,
@@ -580,8 +717,96 @@ function quickItemDialog(q) {
       if (a !== "ok") { done(null); return; }
       const name = ov.querySelector("#md-qname").value.trim();
       if (!name) { toast("名前を入力してください"); return; }
-      done({ name, categoryId: ov.querySelector("#md-qcat").value || null, accountId: ov.querySelector("#md-qacc").value || null });
+      const amt = Math.round(Number(ov.querySelector("#md-qamt").value));
+      done({
+        name,
+        categoryId: ov.querySelector("#md-qcat").value || null,
+        accountId: ov.querySelector("#md-qacc").value || null,
+        amount: amt > 0 ? amt : null
+      });
     }
+  });
+}
+
+/* 割り勘の元記録ピッカー。
+   返り値: {ref:{...}} 選択 / {ref:null} 元記録なし / null キャンセル */
+function warikanRefDialog() {
+  const from = (() => {
+    const d = new Date(); d.setMonth(d.getMonth() - 3);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-01";
+  })();
+  const all = state.transactions
+    .filter(t => t.type === "expense" && t.name && !t.name.startsWith("残高調整"))
+    .map(t => ({ t, total: txAmount(t), settled: settledOf(t.id) }))
+    .filter(x => x.total - x.settled > 0)
+    .sort((a, b) => b.t.date.localeCompare(a.t.date));
+  let showAll = false, q = "", limit = 50;
+
+  const rows = () => {
+    const kw = q.trim().toLowerCase();
+    const list = all
+      .filter(x => showAll || x.t.date >= from)
+      .filter(x => !kw || x.t.name.toLowerCase().indexOf(kw) >= 0);
+    const shown = list.slice(0, limit);
+    if (!shown.length) return `<div class="empty">該当する支出の記録がありません</div>`;
+    // 1行目: 名前 / 金額、2行目: 日付・カテゴリ / 残り
+    return shown.map(x => `<div class="wrow" data-md="pick" data-id="${x.t.id}">
+        <div class="wn">${esc(x.t.name)}</div>
+        <div class="wv num">${yen(x.total)}</div>
+        <div class="wm">${esc(x.t.date.slice(5).replace("-", "/"))} ・ ${esc((cat(x.t.categoryId) || { name: "未分類" }).name)}</div>
+        <div class="wr">${x.settled ? `残り ${yen(x.total - x.settled)}` : ""}</div>
+      </div>`).join("")
+      + (list.length > shown.length ? `<button class="btn-ghost" data-md="more">さらに表示 (${list.length - shown.length}件)</button>` : "")
+      + (!showAll ? `<button class="btn-ghost" data-md="older">3ヶ月より前も探す</button>` : "");
+  };
+
+  return dialog({
+    html: `<p class="md-title">どの支出の割り勘?</p>
+      <input id="md-wq" type="text" placeholder="名前で絞り込む" autocomplete="off">
+      <div class="wlist" id="md-wlist">${rows()}</div>
+      <div class="btns">
+        <button class="cancel" data-md="c">キャンセル</button>
+        <button class="ok" data-md="cat">🏷 カテゴリだけ指定</button>
+      </div>`,
+    cancelValue: null, autofocus: false,
+    onOpen: ov => {
+      ov.querySelector("#md-wq").addEventListener("input", e => {
+        q = e.target.value; limit = 50;
+        ov.querySelector("#md-wlist").innerHTML = rows();
+      });
+    },
+    onAction: async (a, done, ov, btn) => {
+      if (a === "c") { done(null); return; }
+      if (a === "more") { limit += 50; ov.querySelector("#md-wlist").innerHTML = rows(); return; }
+      if (a === "older") { showAll = true; limit = 50; ov.querySelector("#md-wlist").innerHTML = rows(); return; }
+      if (a === "cat") {
+        // 元記録は特定できないが、どのカテゴリの割り勘かは分かる場合
+        const cid = await categoryPickDialog();
+        if (!cid) return;
+        // total は null = 上限なし。Infinity を入れると ¥∞ が表示され、
+        // JSON.stringify で null になって保存後に ¥0 の記録が残ってしまう
+        done({ ref: { txId: null, name: (cat(cid) || { name: "" }).name, date: todayStr(), total: null, settled: 0, categoryId: cid } });
+        return;
+      }
+      if (a === "pick") {
+        const x = all.find(y => y.t.id === btn.dataset.id);
+        if (!x) { done(null); return; }
+        done({ ref: { txId: x.t.id, name: x.t.name, date: x.t.date, total: x.total,
+                      settled: x.settled, categoryId: x.t.categoryId || null } });
+      }
+    }
+  });
+}
+
+/* 支出カテゴリを1つ選ぶだけの小さなダイアログ */
+function categoryPickDialog() {
+  const cats = state.categories.filter(c => c.type === "expense").sort((a, b) => a.sortOrder - b.sortOrder);
+  return dialog({
+    html: `<p class="md-title">どのカテゴリの割り勘?</p>
+      <div class="chips">${cats.map(c => `<button class="chip" data-md="p" data-id="${c.id}"><span>${catIcon(c)} ${esc(c.name)}</span></button>`).join("")}</div>
+      <div class="btns"><button class="cancel" data-md="c">キャンセル</button></div>`,
+    cancelValue: null, autofocus: false,
+    onAction: (a, done, ov, btn) => { done(a === "p" ? btn.dataset.id : null); }
   });
 }
 
@@ -595,6 +820,10 @@ function balances() {
   return b;
 }
 function totalAssets(b) { return state.accounts.filter(a => a.kind !== "credit").reduce((s,a) => s + b[a.id], 0); }
+/* 貯蓄に回している分。使えるお金の計算から除く */
+function totalSavings(b) { return state.accounts.filter(a => a.kind !== "credit" && a.savings).reduce((s,a) => s + b[a.id], 0); }
+/* 実際に使えるお金 = 資産合計 − 貯蓄 */
+function totalAvailable(b) { return totalAssets(b) - totalSavings(b); }
 function totalCredit(b) { return state.accounts.filter(a => a.kind === "credit").reduce((s,a) => s + b[a.id], 0); }
 function txAmount(t) {
   const vals = Object.values(t.amounts);
@@ -614,26 +843,53 @@ function monthTx(ym) {
     .filter(t => t.date && t.date.slice(0,7) === ym)
     .sort((x,y) => y.date.localeCompare(x.date) || state.transactions.indexOf(y) - state.transactions.indexOf(x));
 }
-function monthSummary(ym) {
-  let inc = 0, exp = 0;
-  monthTx(ym).forEach(t => {
-    if (t.type === "income") {
-      const c = cat(t.categoryId);
-      if (c && c.offsetExpense) exp -= txAmount(t); // 割り勘: 支出から差し引く
-      else inc += txAmount(t);
-    }
-    else if (t.type === "expense") exp += txAmount(t);
-  });
-  return { inc, exp };
-}
-function expenseByCategory(ym) {
+/* カテゴリ別の支出(生値)。割り勘は元記録のカテゴリからマイナスされるので負にもなる。
+   monthSummary の exp はこれの合計として導出する — 同じ値を2箇所で計算しないことで
+   「合計からも引き、カテゴリからも引く」という二重減算を構造的に防ぐ */
+function expenseByCategoryRaw(ym) {
   const m = {};
   monthTx(ym).forEach(t => {
-    if (t.type !== "expense") return;
-    const k = t.categoryId || "_none";
-    m[k] = (m[k] || 0) + txAmount(t);
+    if (t.type === "expense") {
+      const k = t.categoryId || "_none";
+      m[k] = (m[k] || 0) + txAmount(t);
+    } else if (t.type === "income") {
+      const c = cat(t.categoryId);
+      if (c && c.offsetExpense) {
+        // 元記録が分かっていればそのカテゴリから、分からなければ未分類から差し引く
+        const k = t.offsetCategoryId || "_none";
+        m[k] = (m[k] || 0) - txAmount(t);
+      }
+    }
   });
-  return Object.entries(m).filter(e => e[1] > 0).sort((a,b) => b[1] - a[1]);
+  return m;
+}
+function monthSummary(ym) {
+  let inc = 0;
+  monthTx(ym).forEach(t => {
+    if (t.type !== "income") return;
+    const c = cat(t.categoryId);
+    if (!(c && c.offsetExpense)) inc += txAmount(t); // 割り勘は収入に計上しない
+  });
+  const raw = expenseByCategoryRaw(ym);
+  const exp = Object.keys(raw).reduce((s, k) => s + raw[k], 0);
+  return { inc, exp };
+}
+/* 元記録 txId に対して既に精算済みの合計。excludeId は編集中の自分自身を除くため */
+function settledOf(txId, excludeId) {
+  if (!txId) return 0;
+  let s = 0;
+  state.transactions.forEach(t => {
+    if (t.id === excludeId) return;
+    if (t.type !== "income" || t.refTxId !== txId) return;
+    const c = cat(t.categoryId);
+    if (c && c.offsetExpense) s += txAmount(t);
+  });
+  return s;
+}
+/* 表示用: 正の値だけを額の降順で。割り勘が当月のそのカテゴリ支出を超えると
+   負になるが、その場合は「使っていない」扱いで一覧から落とす */
+function expenseByCategory(ym) {
+  return Object.entries(expenseByCategoryRaw(ym)).filter(e => e[1] > 0).sort((a, b) => b[1] - a[1]);
 }
 function todaySpent() {
   const td = todayStr();
@@ -707,6 +963,14 @@ function txSub(t, withDate) {
     const c = cat(t.categoryId);
     parts.push(c ? c.name : "未分類");
     parts.push(Object.keys(t.amounts).map(k => { const a = acc(k); return a ? a.name : "?"; }).join(", "));
+    // 割り勘: どの記録の精算かが分かるようにする
+    if (c && c.offsetExpense) {
+      const oc = t.offsetCategoryId ? cat(t.offsetCategoryId) : null;
+      if (t.refTxId) {
+        const src = state.transactions.find(x => x.id === t.refTxId);
+        parts.push(src ? "← " + src.name : "← 元記録なし");
+      } else if (oc) parts.push("← " + oc.name);
+    }
   }
   return parts.join(" ・ ");
 }
@@ -718,10 +982,15 @@ function txAmountHtml(t) {
   return `<div class="a trf num">${yen(v)}</div>`;
 }
 function txItemHtml(t, withDate) {
-  return `<div class="tx tappable" data-action="edit-tx" data-id="${t.id}">
-    <div class="sil">${txIcon(t)}</div>
-    <div class="body"><div class="n">${esc(t.name)}</div><div class="s">${esc(txSub(t, withDate))}</div></div>
-    ${txAmountHtml(t)}
+  // 支出だけ「⚡」でクイックチップに登録できる。行タップの編集と衝突しないよう別ボタンにする
+  // (長押しは iOS Safari のテキスト選択と競合するので使わない)
+  const qreg = t.type === "expense"
+    ? `<button class="tx-q" data-action="quick-from-tx" data-id="${t.id}" title="クイックに登録">⚡</button>` : "";
+  return `<div class="tx">
+    <div class="sil tappable" data-action="edit-tx" data-id="${t.id}">${txIcon(t)}</div>
+    <div class="body tappable" data-action="edit-tx" data-id="${t.id}"><div class="n">${esc(t.name)}</div><div class="s">${esc(txSub(t, withDate))}</div></div>
+    <span class="tappable" data-action="edit-tx" data-id="${t.id}">${txAmountHtml(t)}</span>
+    ${qreg}
   </div>`;
 }
 function ransomHtml(text) { return `<div class="ransom">${[...text].map(ch => `<span>${esc(ch)}</span>`).join("")}</div>`; }
@@ -731,25 +1000,110 @@ function orderedGroups() {
   return seen;
 }
 // よく使う記録名(頻度順)
-function frequentNames(n) {
-  const cnt = {};
-  state.transactions.forEach(t => {
-    if (t.type !== "expense" || !t.name) return; // クイックチップは支出の記録名のみ
-    if (t.name.startsWith("残高調整")) return;
-    cnt[t.name] = (cnt[t.name] || 0) + 1;
-  });
-  return Object.keys(cnt).sort((a,b) => cnt[b] - cnt[a]).slice(0, n);
-}
 function lastTxByName(name) {
   let best = null;
   state.transactions.forEach(t => { if (t.name === name && (!best || t.date >= best.date)) best = t; });
   return best;
 }
 // クイックチップの一覧(カスタム設定があればそれ、なければ頻度順の自動)
+/* 自動モードで金額まで推定するときの閾値。
+   同じ名前でも金額がバラつく記録(昼飯など)に固定金額を当てると毎回外れるので、
+   「多数派の金額」が十分に多数派のときだけ採用する */
+const QUICK_AMOUNT_MIN_COUNT = 3;
+const QUICK_AMOUNT_MIN_RATIO = 0.5;
+const QUICK_MAX = 3;   // ホームに並べるチップの上限(設定にはこれより多く持てる)
+
+/* 支出の記録から、よく使う順にチップ候補を組み立てる */
+function autoQuickItems(n) {
+  const by = {};
+  state.transactions.forEach(t => {
+    if (t.type !== "expense" || !t.name) return;
+    if (t.name.startsWith("残高調整")) return;
+    const e = by[t.name] || (by[t.name] = { count: 0, amounts: {}, last: null });
+    e.count++;
+    const v = Math.round(txAmount(t));
+    e.amounts[v] = (e.amounts[v] || 0) + 1;
+    if (!e.last || t.date >= e.last.date) e.last = t;
+  });
+  return Object.keys(by)
+    .sort((a, b) => by[b].count - by[a].count)
+    .slice(0, n)
+    .map(name => {
+      const e = by[name];
+      const top = Object.keys(e.amounts).sort((x, y) => e.amounts[y] - e.amounts[x])[0];
+      const c = e.amounts[top];
+      const stable = c >= QUICK_AMOUNT_MIN_COUNT && c / e.count >= QUICK_AMOUNT_MIN_RATIO;
+      const accIds = e.last ? Object.keys(e.last.amounts) : [];
+      return {
+        name,
+        categoryId: e.last ? e.last.categoryId : null,
+        accountId: accIds.length === 1 ? accIds[0] : null,
+        amount: stable ? Number(top) : null
+      };
+    });
+}
+const isCustomQuick = () => Array.isArray(state.settings.quickItems);
+/* カスタムが空配列でも自動に落とさない。落とすと「ホームは自動・設定はカスタム」と
+   表示が食い違う(renderSettings は Array.isArray で判定しているため) */
 function quickItemsList() {
-  const custom = state.settings.quickItems;
-  if (Array.isArray(custom) && custom.length) return custom;
-  return frequentNames(5).map(n => ({ name: n, categoryId: null, accountId: null }));
+  return isCustomQuick() ? state.settings.quickItems : autoQuickItems(QUICK_MAX);
+}
+
+/* チップ → 記録。金額が無ければ null を返す(呼び出し側が詳細入力に回す) */
+function quickTxFromItem(it) {
+  const amt = Math.round(Number(it.amount));
+  if (!amt || amt <= 0) return null;
+  const usable = it.accountId && acc(it.accountId) && !acc(it.accountId).archived;
+  const accId = usable ? it.accountId : defaultQuickAccount(it.name);
+  if (!accId) return null;
+  const a = acc(accId);
+  const catId = (it.categoryId && cat(it.categoryId)) ? it.categoryId : quickCategoryOf(it.name);
+  return { id: uid(), date: todayStr(), name: it.name, type: "expense", categoryId: catId,
+    amounts: { [accId]: a.kind === "credit" ? amt : -amt } };
+}
+function quickPrefillFromItem(it) {
+  const usable = it.accountId && acc(it.accountId) && !acc(it.accountId).archived;
+  return {
+    name: it.name,
+    categoryId: (it.categoryId && cat(it.categoryId)) ? it.categoryId : quickCategoryOf(it.name),
+    accountId: usable ? it.accountId : defaultQuickAccount(it.name),
+    amount: null
+  };
+}
+/* 値を埋めた状態で詳細入力を開く(チップの金額なし / レシート読み取り 共用) */
+function openPrefilledDetail(p) {
+  pendingPrefill = p;
+  inputMode = "detail";
+  inputType = "expense";
+  editingId = null;
+  saveAsQuick = false;
+  selectedCatId = p.categoryId || null;
+  showScreen("scr-input", true);
+}
+function undoTx(id) {
+  if (!state.transactions.some(t => t.id === id)) return;  // 既に消えている(二重発火など)
+  state.transactions = state.transactions.filter(t => t.id !== id);
+  persist();
+  render();
+  toast("取り消しました");
+}
+/* 詳細入力の内容をチップとして登録する */
+function registerQuickItem(name, catId, amounts) {
+  if (!name) return;
+  // 自動モードのまま1件足すと、表示されていた他のチップが全部消えてしまう。
+  // 現在の自動チップを引き継いでからカスタムに移行する
+  if (!isCustomQuick()) state.settings.quickItems = autoQuickItems(QUICK_MAX);
+  const arr = state.settings.quickItems;
+  const ids = Object.keys(amounts);
+  const item = {
+    name,
+    categoryId: catId || null,
+    accountId: ids.length === 1 ? ids[0] : null,   // 複数口座にまたがるなら自動に倒す
+    amount: Math.round(ids.reduce((s, k) => s + Math.abs(amounts[k]), 0)) || null
+  };
+  const i = arr.findIndex(q => q.name === name);
+  if (i >= 0) arr[i] = item; else arr.unshift(item);
+  if (arr.length > 8) arr.length = 8;
 }
 function lastChargeRoute() {
   let best = null;
@@ -769,16 +1123,18 @@ function lastChargeRoute() {
 /* ---------------- 画面状態 ---------------- */
 let viewMonth = todayStr().slice(0,7);
 let currentScreen = "scr-home";
-let inputMode = "quick";       // quick | detail
+let inputMode = "detail";      // detail | quick(チャージ/割り勘のテンキー画面のみ)
 let inputType = "expense";     // 詳細フォームの種別
 let selectedCatId = null;
 let editingId = null;
 // クイック入力の状態
-let qMode = "expense";         // expense | charge | warikan
-let qName = null;
-let qCatId = null;             // チップで指定されたカテゴリ(null=自動)
+let qMode = "charge";          // charge | warikan (テンキー画面のモード)
 let qAmount = "";
 let qAccountId = null;
+let qRef = null;               // 割り勘: 選択した元記録 {txId,name,date,total,settled,categoryId}
+let pendingPrefill = null;     // 詳細入力に一度だけ流し込む初期値(チップ/レシート共用)
+let saveAsQuick = false;       // 詳細入力: 保存時にクイックチップにも登録するか
+let homeAnim = true;           // ホームに来たときだけチップの登場アニメを再生する
 
 function monthLabel(ym) { return `${Number(ym.slice(0,4))}<small>年</small>${Number(ym.slice(5,7))}<small>月</small>`; }
 function shiftMonth(delta) {
@@ -861,12 +1217,22 @@ function renderHome() {
       </div>`;
   }
 
-  // クイックボタン(1つ目はチップ設定 or 最頻の記録名)
-  const qItems = quickItemsList();
-  const top = qItems[0] || null;
-  const topBtn = top
-    ? `<button class="qbtn" data-action="q-item" data-idx="0"><span class="e">${top.categoryId && cat(top.categoryId) ? catIcon(cat(top.categoryId)) : (() => { const t = lastTxByName(top.name); return t ? txIcon(t) : "🍜"; })()}</span>${esc(top.name)}</button>`
-    : `<button class="qbtn" data-action="quick-blank"><span class="e">🍜</span>入力</button>`;
+  // クイックチップ: タップした瞬間に記録が確定する(金額が未設定なら詳細入力が開く)
+  const qItems = quickItemsList().slice(0, QUICK_MAX);
+  // 白黒を1つおきに。チップ行と下の行で通し番号を継いで市松にする
+  let qn = 0;
+  const alt = () => (qn++ % 2 ? " dark" : "");
+  const chipHtml = qItems.length
+    ? qItems.map((it, i) => {
+        const icon = (it.categoryId && cat(it.categoryId)) ? catIcon(cat(it.categoryId))
+          : (() => { const t = lastTxByName(it.name); return t ? txIcon(t) : "🍜"; })();
+        return `<button class="qbtn${alt()}" data-action="q-item" data-idx="${i}">
+          <span class="e">${icon}</span><span class="qn">${esc(it.name)}</span>
+          ${it.amount ? `<span class="amt num">${yen(it.amount)}</span>`
+                      : `<span class="amt none">金額を入力</span>`}
+        </button>`;
+      }).join("")
+    : `<div class="empty">クイックチップがありません。<br>記録するときに「クイックに登録」するか、設定から追加できます。</div>`;
 
   // 口座残高
   const accRows = state.accounts.slice().sort((x,y) => x.sortOrder - y.sortOrder)
@@ -875,10 +1241,27 @@ function renderHome() {
       const credit = a.kind === "credit";
       return `<div class="acc ${credit ? "credit" : ""} ${a.archived ? "arch" : ""}">
         <div class="sil">${accIcon(a)}</div>
-        <div class="an">${esc(a.name)}${credit ? '<span class="tag">支払予定</span>' : ""}${a.archived ? '<span class="tag" style="background:#555">停止中</span>' : ""}</div>
+        <div class="an">${esc(a.name)}${credit ? '<span class="tag">支払予定</span>' : ""}${a.savings ? '<span class="tag sav">貯蓄</span>' : ""}${a.archived ? '<span class="tag" style="background:#555">停止中</span>' : ""}</div>
         <div class="av num">${b[a.id] < 0 ? "−" : ""}${yen(b[a.id])}</div>
       </div>`;
     }).join("");
+
+  // 使えるお金を主役にし、総資産は内訳として小さく添える。
+  // 貯蓄の口座が1つも無いうちは両者が同額になるので、その場合は従来どおり総資産だけ出す
+  const sav = totalSavings(b);
+  const assetHtml = sav !== 0
+    ? `<div class="asset-bar">
+        <div class="t">使えるお金<span class="en">AVAILABLE</span></div>
+        <div class="v num"><span class="yen">¥</span>${Math.round(totalAvailable(b)).toLocaleString()}</div>
+      </div>
+      <div class="asset-sub">
+        <span>総資産 <b class="num">${yen(totalAssets(b))}</b></span>
+        <span>うち貯蓄 <b class="num">${yen(sav)}</b></span>
+      </div>`
+    : `<div class="asset-bar">
+        <div class="t">総資産<span class="en">TOTAL ASSETS</span></div>
+        <div class="v num"><span class="yen">¥</span>${Math.round(totalAssets(b)).toLocaleString()}</div>
+      </div>`;
 
   const recent = state.transactions.slice()
     .sort((x,y) => y.date.localeCompare(x.date) || state.transactions.indexOf(y) - state.transactions.indexOf(x))
@@ -894,21 +1277,20 @@ function renderHome() {
     ${budgetHtml}
     ${dueHtml}
     <div class="sec-head">${ransomHtml("クイック")}<div class="en">QUICK ENTRY</div></div>
-    <div class="quick">
-      ${topBtn}
-      <button class="qbtn dark" data-action="quick-charge"><span class="e">⚡</span>チャージ</button>
-      <button class="qbtn" data-action="quick-warikan"><span class="e">🤝</span>割り勘</button>
-      <button class="qbtn dark" data-action="quick-blank"><span class="e">＋</span>その他</button>
+    <div class="quick${homeAnim ? " anim" : ""}">${chipHtml}</div>
+    <div class="quick sub">
+      <button class="qbtn${alt()}" data-action="quick-charge"><span class="e">⚡</span><span>チャージ</span></button>
+      <button class="qbtn${alt()}" data-action="quick-warikan"><span class="e">🤝</span><span>割り勘</span></button>
+      <button class="qbtn${alt()}" data-action="receipt-shot"><span class="e">📷</span><span>レシート</span></button>
     </div>
-    <div class="asset-bar">
-      <div class="t">総資産<span class="en">TOTAL ASSETS</span></div>
-      <div class="v num"><span class="yen">¥</span>${Math.round(totalAssets(b)).toLocaleString()}</div>
-    </div>
+    <button class="btn-ghost wide" data-action="nav" data-scr="scr-input">＋ その他を詳細入力</button>
+    ${assetHtml}
     <div class="sec-head">${ransomHtml("口座残高")}<div class="en">ACCOUNTS</div></div>
     <div class="accs">${accRows}</div>
     <div class="sec-head">${ransomHtml("最近の記録")}<div class="en">RECORDS</div></div>
     <div>${recent.length ? recent.map(t => txItemHtml(t, true)).join("") : '<div class="empty">まだ記録がありません</div>'}</div>
   `;
+  homeAnim = false;   // 以降の再描画(ワンタップ記録など)ではアニメを再生しない
 }
 
 /* ---------------- 入力(クイック) ---------------- */
@@ -928,51 +1310,77 @@ function defaultQuickAccount(name) {
   const a = state.accounts.find(a => !a.archived);
   return a ? a.id : null;
 }
+/* チャージ / 割り勘 専用のテンキー画面。
+   ふつうの支出はホームのチップ(ワンタップ)か詳細入力が担当する */
 function renderQuick() {
   const b = balances();
-  const items = quickItemsList();
-  if (qMode === "expense" && !qName && items.length) { qName = items[0].name; qCatId = items[0].categoryId || null; }
-  if (!qAccountId) qAccountId = defaultQuickAccount(qName);
+  const isCharge = qMode === "charge";
+  if (!isCharge && !qAccountId) qAccountId = defaultQuickAccount(null);
 
-  const catId = qMode === "warikan" ? "warikan" : qMode === "charge" ? null : (qCatId || quickCategoryOf(qName || ""));
-  const catLabel = qMode === "charge" ? "振替: チャージ(支出になりません)"
-    : qMode === "warikan" ? "割り勘: 支出から差し引き"
-    : `カテゴリ: ${(cat(catId) || {name:"その他"}).name}${qCatId ? "(チップ設定)" : `(「${qName || "-"}」から自動)`}`;
+  const catLabel = isCharge
+    ? "振替: チャージ(支出になりません)"
+    : qRef
+      ? `割り勘: ${esc((cat(qRef.categoryId) || { name: "未分類" }).name)} から差し引き`
+      : "割り勘: 元記録を選んでください";
 
-  const chips = [
-    ...items.map((it, i) => `<button class="chip ${qMode==="expense" && qName===it.name ? "sel" : ""}" data-action="q-item" data-idx="${i}"><span>${esc(it.name)}</span></button>`),
-    `<button class="chip ${qMode==="charge" ? "sel" : ""}" data-action="quick-charge"><span>⚡ チャージ</span></button>`,
-    `<button class="chip ${qMode==="warikan" ? "sel" : ""}" data-action="quick-warikan"><span>🤝 割り勘</span></button>`,
-    `<button class="chip" data-action="q-free"><span>✎ 自由入力</span></button>`,
-    `<button class="chip" data-action="nav" data-scr="scr-settings" style="opacity:.7"><span>⚙ チップ編集</span></button>`
-  ].join("");
-
-  let accHtml = "";
-  if (qMode === "charge") {
-    const route = lastChargeRoute();
-    if (route) {
-      accHtml = `<div class="charge-route"><span>${esc(acc(route.fromId).name)}</span><span class="arr">➡</span><span>${esc(acc(route.toId).name)}</span></div>
-        <div class="hint" style="text-align:center">前回と同じルートでチャージします。別の口座は<button class="link-btn" data-action="to-detail">詳細入力</button>から。</div>`;
+  // --- 割り勘: 元記録カード ---
+  let refHtml = "";
+  if (!isCharge) {
+    if (qRef && qRef.txId) {
+      const settled = settledOf(qRef.txId);
+      const remain = Math.max(0, qRef.total - settled);
+      refHtml = `<div class="refcard">
+        <div class="rt"><span class="rn">${esc(qRef.name)}</span><span class="rd">${esc(qRef.date.slice(5).replace("-", "/"))}</span></div>
+        <div class="rv"><span class="num">${yen(qRef.total)}</span>
+          <span class="rs">精算済 <b class="num">${yen(settled)}</b> / 残り <b class="num">${yen(remain)}</b></span></div>
+        <div class="rb">
+          ${remain > 0 ? `<button class="btn-ghost" data-action="w-all" data-amt="${remain}">全額 ${yen(remain)}</button>` : ""}
+          <button class="btn-ghost" data-action="quick-warikan">変更</button>
+        </div>
+      </div>
+      <div class="hint" style="text-align:center">日付は元記録に合わせています(${esc(qRef.date)})。</div>`;
+    } else if (qRef) {
+      // カテゴリだけ指定(元記録なし)。上限が無いので「全額」は出さない
+      refHtml = `<div class="refcard">
+        <div class="rt"><span class="rn">${catIcon(cat(qRef.categoryId))} ${esc((cat(qRef.categoryId) || { name: "未分類" }).name)}</span></div>
+        <div class="rs">元記録は指定せず、このカテゴリの支出から差し引きます。</div>
+        <div class="rb"><button class="btn-ghost" data-action="quick-warikan">変更</button></div>
+      </div>`;
     } else {
-      accHtml = `<div class="hint" style="text-align:center">チャージ履歴がないため、<button class="link-btn" data-action="to-detail">詳細入力</button>で口座を指定してください。</div>`;
+      refHtml = `<div class="refcard none">
+        <div class="rt"><span class="rn">元記録なし</span></div>
+        <div class="rs">どの支出の精算か指定すると、そのカテゴリの予算からも差し引かれます。</div>
+        <div class="rb"><button class="btn-ghost" data-action="quick-warikan">記録を選ぶ</button></div>
+      </div>`;
     }
+  }
+
+  // --- 口座 ---
+  let accHtml = "";
+  if (isCharge) {
+    const route = lastChargeRoute();
+    accHtml = route
+      ? `<div class="charge-route"><span>${esc(acc(route.fromId).name)}</span><span class="arr">➡</span><span>${esc(acc(route.toId).name)}</span></div>
+         <div class="hint" style="text-align:center">前回と同じルートでチャージします。別の口座は<button class="link-btn" data-action="to-detail">詳細入力</button>から。</div>`
+      : `<div class="hint" style="text-align:center">チャージ履歴がないため、<button class="link-btn" data-action="to-detail">詳細入力</button>で口座を指定してください。</div>`;
   } else {
-    accHtml = `<div class="paylist">` + state.accounts.slice().sort((x,y)=>x.sortOrder-y.sortOrder)
+    accHtml = `<div class="sec-head">${ransomHtml("受け取り口座")}<div class="en">DEPOSIT TO</div></div>
+      <div class="paylist">` + state.accounts.slice().sort((x, y) => x.sortOrder - y.sortOrder)
       .filter(a => !a.archived)
-      .map(a => `<div class="payrow ${a.id===qAccountId?"sel":""}" data-action="q-acc" data-id="${a.id}">
+      .map(a => `<div class="payrow ${a.id === qAccountId ? "sel" : ""}" data-action="q-acc" data-id="${a.id}">
         <span class="pn">${esc(a.name)}</span>
-        <span class="bal num">${a.kind==="credit" ? "支払予定 " : ""}${yen(b[a.id])}</span>
+        <span class="bal num">${a.kind === "credit" ? "支払予定 " : ""}${yen(b[a.id])}</span>
       </div>`).join("") + `</div>`;
   }
 
   const amtDisp = qAmount ? Number(qAmount).toLocaleString() : "0";
   $("#scr-input").innerHTML = `
-    <div class="page-title">${ransomHtml(qMode === "charge" ? "チャージ" : qMode === "warikan" ? "割り勘" : "記録する")}</div>
+    <div class="page-title">${ransomHtml(isCharge ? "チャージ" : "割り勘")}</div>
     <div class="amt-zone">
       <div class="v num"><span class="yen">¥</span>${amtDisp}</div>
-      <div class="cat">${esc(catLabel)}</div>
+      <div class="cat">${catLabel}</div>
     </div>
-    <div class="chips">${chips}</div>
+    ${refHtml}
     ${accHtml}
     <div class="keypad">
       ${[1,2,3,4,5,6,7,8,9].map(n => `<button class="key" data-action="q-key" data-k="${n}">${n}</button>`).join("")}
@@ -981,36 +1389,40 @@ function renderQuick() {
       <button class="key fn" data-action="q-del">⌫</button>
     </div>
     <button class="save-btn" data-action="q-save">記録する!<span class="en">SAVE THE RECORD</span></button>
-    <div class="hint" style="text-align:center">日付の変更・複数口座・編集は <button class="link-btn" data-action="to-detail">詳細入力へ ›</button></div>
+    <div class="hint" style="text-align:center"><button class="link-btn" data-action="nav" data-scr="scr-home">‹ ホームへ</button></div>
   `;
 }
-function quickSave() {
+async function quickSave() {
   const amt = Math.round(Number(qAmount));
   if (!amt || amt <= 0) { toast("金額を入力してください"); return; }
-  const date = todayStr();
   let tx = null;
   if (qMode === "charge") {
     const route = lastChargeRoute();
     if (!route) { toast("詳細入力から口座を指定してください"); return; }
-    tx = { id: uid(), date, name: "チャージ", type: "transfer", categoryId: null,
+    tx = { id: uid(), date: todayStr(), name: "チャージ", type: "transfer", categoryId: null,
       amounts: { [route.fromId]: -amt, [route.toId]: amt } };
-  } else if (qMode === "warikan") {
-    if (!qAccountId) { toast("受け取り口座を選んでください"); return; }
-    const a = acc(qAccountId);
-    tx = { id: uid(), date, name: "割り勘", type: "income", categoryId: "warikan",
-      amounts: { [qAccountId]: a.kind === "credit" ? -amt : amt } };
   } else {
-    if (!qAccountId) { toast("口座を選んでください"); return; }
+    if (!qAccountId) { toast("受け取り口座を選んでください"); return; }
+    if (qRef && qRef.txId) {   // カテゴリだけ指定のときは上限が無い
+      const remain = qRef.total - settledOf(qRef.txId);
+      // 元記録の金額入力ミスや、チップ込みで多く返ってくることは実際にあるので
+      // 完全にブロックせず1回確認するだけにする
+      if (amt > remain && !await confirmDialog(
+        `元記録「${qRef.name}」の残り(${yen(remain)})を超えています。\nこのまま記録しますか?`,
+        { okText: "記録する" })) return;
+    }
     const a = acc(qAccountId);
-    const name = qName || "支出";
-    tx = { id: uid(), date, name, type: "expense", categoryId: qCatId || quickCategoryOf(name),
-      amounts: { [qAccountId]: a.kind === "credit" ? amt : -amt } };
+    tx = { id: uid(), date: (qRef && qRef.txId) ? qRef.date : todayStr(), name: "割り勘",
+      type: "income", categoryId: warikanCatId(),
+      refTxId: qRef ? qRef.txId : null,
+      offsetCategoryId: qRef ? qRef.categoryId : null,
+      amounts: { [qAccountId]: a.kind === "credit" ? -amt : amt } };
   }
   state.transactions.push(tx);
   persist();
   toast("記録しました!");
-  qAmount = "";
-  viewMonth = date.slice(0,7);
+  qAmount = ""; qRef = null;
+  viewMonth = tx.date.slice(0, 7);
   showScreen("scr-home");
 }
 
@@ -1023,8 +1435,11 @@ function renderInput() {
     .sort((x,y) => x.sortOrder - y.sortOrder);
   if (!selectedCatId || !cats.some(c => c.id === selectedCatId)) selectedCatId = cats.length ? cats[0].id : null;
 
-  const dateVal = editing ? editing.date : todayStr();
-  const nameVal = editing ? editing.name : "";
+  // pendingPrefill はチップ(金額なし)とレシート読み取りの共通の入り口。
+  // innerHTML 総入れ替えなので、DOM を後から書き換えるのではなく描画の入力として使う
+  const pre = editing ? null : pendingPrefill;
+  const dateVal = editing ? editing.date : ((pre && pre.date) || todayStr());
+  const nameVal = editing ? editing.name : ((pre && pre.name) || "");
 
   let bodyHtml = "";
   if (type === "transfer") {
@@ -1065,6 +1480,7 @@ function renderInput() {
         .sort((x,y)=>x.sortOrder-y.sortOrder).map(a => {
           let v = "";
           if (editing && editing.amounts[a.id] !== undefined) v = Math.abs(editing.amounts[a.id]);
+          else if (pre && pre.accountId === a.id && pre.amount) v = pre.amount;
           return `<div class="pay"><span class="em">${accIcon(a)}</span><div class="n">${esc(a.name)}</div>
             <input type="number" id="amt-${a.id}" inputmode="numeric" placeholder="¥0" value="${v}"></div>`;
         }).join("");
@@ -1078,8 +1494,17 @@ function renderInput() {
       <div class="fld"><label>金額(使った口座に入力 ・ 複数可)</label>${accInputs}</div>`;
   }
 
+  const banner = (pre && pre.banner)
+    ? `<div class="panel rcp-banner">${esc(pre.banner).replace(/\n/g, "<br>")}</div>` : "";
+  // 新規の支出のときだけ「クイックに登録」を出す(振替・収入・編集では意味がない)
+  const qregBtn = (!editing && type === "expense")
+    ? `<button class="btn-ghost qreg${saveAsQuick ? " on" : ""}" data-action="toggle-qreg">
+         ${saveAsQuick ? "★" : "☆"} この内容をクイックチップに登録する</button>` : "";
+
   $("#scr-input").innerHTML = `
     <div class="page-title">${ransomHtml(editing ? "記録を編集" : "詳細入力")}</div>
+    ${editing ? "" : `<button class="btn-ghost wide" data-action="receipt-shot">📷 レシートを読み取る</button>`}
+    ${banner}
     <div class="seg">
       <button class="${type==="expense"?"on-exp":""}" data-action="set-type" data-type="expense">支出</button>
       <button class="${type==="income"?"on-inc":""}" data-action="set-type" data-type="income">収入</button>
@@ -1088,9 +1513,11 @@ function renderInput() {
     <div class="fld"><label>日付</label><input type="date" id="in-date" value="${dateVal}"></div>
     <div class="fld"><label>名前</label><input type="text" id="in-name" placeholder="例: 昼飯" value="${esc(nameVal)}"></div>
     ${bodyHtml}
+    ${qregBtn}
     <button class="save-btn" data-action="save-tx">${editing ? "更新する!" : "保存する!"}<span class="en">SAVE</span></button>
-    ${editing ? '<button class="btn-danger" data-action="delete-tx">この記録を削除</button>' : '<div class="hint" style="text-align:center"><button class="link-btn" data-action="to-quick">‹ クイック入力に戻る</button></div>'}
+    ${editing ? '<button class="btn-danger" data-action="delete-tx">この記録を削除</button>' : '<div class="hint" style="text-align:center"><button class="link-btn" data-action="nav" data-scr="scr-home">‹ ホームへ</button></div>'}
   `;
+  pendingPrefill = null;   // 1回だけ適用する(種別を切り替えても復活させない)
 }
 
 function saveTx() {
@@ -1132,16 +1559,28 @@ function saveTx() {
     if (!name) { const c = cat(selectedCatId); name = c ? c.name : (inputType === "income" ? "収入" : "支出"); }
   }
 
+  const catId = inputType === "transfer" ? null : selectedCatId;
   if (editingId) {
     const t = state.transactions.find(t => t.id === editingId);
     t.date = date; t.name = name; t.type = inputType;
-    t.categoryId = inputType === "transfer" ? null : selectedCatId;
+    t.categoryId = catId;
     t.amounts = amounts;
+    // この記録を参照している割り勘を追随させる。
+    // ・カテゴリ: 支出でなくなったら差し引き先が無くなるので null に戻す
+    // ・日付: 割り勘は元記録と同じ月に載せているので、月をまたぐ編集をしたら
+    //   一緒に動かさないと「旧月にマイナスだけ残る」状態になる
+    state.transactions.forEach(x => {
+      if (x.refTxId !== editingId) return;
+      x.offsetCategoryId = (inputType === "expense") ? catId : null;
+      x.date = date;
+    });
     toast("更新しました");
   } else {
-    state.transactions.push({ id: uid(), date, name, type: inputType, categoryId: inputType === "transfer" ? null : selectedCatId, amounts });
-    toast("保存しました");
+    state.transactions.push({ id: uid(), date, name, type: inputType, categoryId: catId, amounts });
+    if (saveAsQuick && inputType === "expense") registerQuickItem(name, catId, amounts);
+    toast(saveAsQuick && inputType === "expense" ? "保存してクイックに登録しました" : "保存しました");
   }
+  saveAsQuick = false;
   persist();
   viewMonth = date.slice(0,7);
   const dest = editingId ? "scr-history" : "scr-home";
@@ -1151,7 +1590,27 @@ function saveTx() {
 async function deleteTx() {
   const t = state.transactions.find(t => t.id === editingId);
   if (!t) return;
-  if (!await confirmDialog(`「${t.name}」(${t.date})を削除しますか?`, { danger: true, okText: "削除" })) return;
+  const kids = state.transactions.filter(x => x.refTxId === editingId);
+  if (kids.length) {
+    // 3択なので confirmDialog(boolean)では足りない
+    const r = await dialog({
+      html: `<p class="md-title">紐づいた割り勘があります</p>
+        <p>「${esc(t.name)}」には割り勘の記録が ${kids.length}件 紐づいています。</p>
+        <div class="hint">「割り勘は残す」を選ぶと、差し引きはそのまま維持され、過去の集計は変わりません。</div>
+        <div class="btns">
+          <button class="cancel" data-md="c">キャンセル</button>
+          <button class="ok" data-md="keep">割り勘は残す</button>
+          <button class="ok danger" data-md="all">両方削除</button>
+        </div>`,
+      cancelValue: "c", autofocus: false,
+      onAction: (a, done) => done(a)
+    });
+    if (r === "c" || r === null) return;
+    if (r === "all") state.transactions = state.transactions.filter(x => x.refTxId !== editingId);
+    else kids.forEach(k => { k.refTxId = null; });   // offsetCategoryId は残す = 集計不変
+  } else {
+    if (!await confirmDialog(`「${t.name}」(${t.date})を削除しますか?`, { danger: true, okText: "削除" })) return;
+  }
   state.transactions = state.transactions.filter(x => x.id !== editingId);
   persist();
   editingId = null;
@@ -1271,16 +1730,17 @@ function renderSettings() {
     </div>
 
     <div class="sec-head">${ransomHtml("クイック")}<div class="en">QUICK CHIPS</div></div>
-    ${Array.isArray(state.settings.quickItems) ? `
+    ${isCustomQuick() ? `
     <div class="set-list">
-      ${state.settings.quickItems.map((q, i) => `<div class="set-item">
+      ${state.settings.quickItems.map((q, i) => `<div class="set-item" ${i >= QUICK_MAX ? 'style="opacity:.5"' : ""}>
         <span>${q.categoryId && cat(q.categoryId) ? catIcon(cat(q.categoryId)) : "🏷"}</span>
         <div class="grow"><span class="nm">${esc(q.name)}</span>
-          <div class="meta">${q.categoryId && cat(q.categoryId) ? esc(cat(q.categoryId).name) : "カテゴリ自動"} ・ ${q.accountId && acc(q.accountId) ? esc(acc(q.accountId).name) : "口座自動"}</div></div>
-        <button class="icon-btn" data-action="quick-up" data-idx="${i}">↑</button>
+          <div class="meta">${i >= QUICK_MAX ? "ホーム非表示 ・ " : ""}<b class="num">${q.amount ? yen(q.amount) : "金額なし(詳細入力へ)"}</b> ・ ${q.categoryId && cat(q.categoryId) ? esc(cat(q.categoryId).name) : "カテゴリ自動"} ・ ${q.accountId && acc(q.accountId) ? esc(acc(q.accountId).name) : "口座自動"}</div></div>
+        <button class="icon-btn" data-action="quick-up" data-idx="${i}" ${i === 0 ? "disabled" : ""}>↑</button>
+        <button class="icon-btn" data-action="quick-down" data-idx="${i}" ${i === state.settings.quickItems.length - 1 ? "disabled" : ""}>↓</button>
         <button class="icon-btn" data-action="quick-edit" data-idx="${i}">✎</button>
         <button class="icon-btn" data-action="quick-del" data-idx="${i}">🗑</button>
-      </div>`).join("") || '<div class="set-item"><div class="grow"><div class="meta">チップがありません。「＋」で追加してください。</div></div></div>'}
+      </div>`).join("") || '<div class="set-item"><div class="grow"><div class="meta">チップがありません。「＋」で追加するか、「🔄」で自動に戻せます。</div></div></div>'}
     </div>
     <button class="btn-ghost" style="justify-content:center" data-action="quick-add">＋ チップを追加</button>
     <button class="btn-ghost" data-action="quick-auto">🔄 自動(よく使う順)に戻す</button>`
@@ -1288,11 +1748,12 @@ function renderSettings() {
     <div class="set-list">
       <div class="set-item"><span>⚡</span>
         <div class="grow"><span class="nm">自動モード</span>
-          <div class="meta">よく使う支出の記録名を自動表示中: ${esc(frequentNames(5).join(" / ") || "(記録なし)")}</div></div>
+          <div class="meta">よく使う支出から自動表示中: ${esc(autoQuickItems(QUICK_MAX).map(q => q.name + (q.amount ? " " + yen(q.amount) : "")).join(" / ") || "(記録なし)")}</div></div>
       </div>
     </div>
     <button class="btn-ghost" style="justify-content:center" data-action="quick-customize">✎ チップを自分で決める(カスタムに切替)</button>`}
-    <div class="hint">※ ホームとクイック入力に表示されるボタンの設定です。1番目のチップはホームのクイックボタンになります。</div>
+    <div class="hint">※ <b>上から${QUICK_MAX}つだけホームに並びます</b>。それ以降は ↑ で順番を上げると出てきます。<br>
+      金額を設定したチップはタップした瞬間に記録されます。金額が空のチップは詳細入力が開きます。</div>
 
     <div class="sec-head">${ransomHtml("カテゴリ")}<div class="en">CATEGORY</div></div>
     <div class="set-list">
@@ -1321,7 +1782,7 @@ function renderSettings() {
       ${accs.map(a => {
         const meta = a.kind === "credit"
           ? `${esc(a.group)} ・ ${a.closingDay === 31 ? "月末" : a.closingDay + "日"}締め ・ 翌月${a.payDay}日払い${a.payFromId && acc(a.payFromId) ? " ・ 引落: " + esc(acc(a.payFromId).name) : ""}`
-          : `${esc(a.group)} ・ 初期残高 ${yen(a.initialBalance||0)}`;
+          : `${esc(a.group)} ・ ${a.savings ? "貯蓄" : "メイン"} ・ 初期残高 ${yen(a.initialBalance||0)}`;
         return `<div class="set-item" ${a.archived ? 'style="opacity:.55"' : ""}>
           <span>${accIcon(a)}</span>
           <div class="grow"><span class="nm">${esc(a.name)}</span>
@@ -1333,7 +1794,28 @@ function renderSettings() {
       }).join("")}
     </div>
     <button class="btn-ghost" style="justify-content:center" data-action="acc-add">＋ 口座を追加</button>
-    <div class="hint">※ 📦 = 使わなくなった口座を入力画面から非表示に(過去の記録はそのまま)。クレカは ✎ から締め日・支払日・引き落とし口座を変更。</div>
+    <div class="hint">※ 📦 = 使わなくなった口座を入力画面から非表示に(過去の記録はそのまま)。クレカは ✎ から締め日・支払日・引き落とし口座を変更。<br>
+      ※ ✎ の「区分」を<b>貯蓄</b>にすると、ホームの「使えるお金」から除かれます(総資産には含まれます)。</div>
+
+    <div class="sec-head">${ransomHtml("レシート")}<div class="en">RECEIPT AI</div></div>
+    <div class="set-list">
+      <div class="set-item"><span>🔑</span>
+        <div class="grow"><span class="nm">Claude APIキー</span>
+          <div class="meta">${(() => { const k = getApiKey(); return k ? "sk-ant-…" + esc(k.slice(-4)) + " (登録済み)" : "未設定"; })()}</div></div>
+        <button class="icon-btn" data-action="apikey-set">✎</button>
+      </div>
+      <div class="set-item"><span>🎯</span>
+        <div class="grow"><span class="nm">読み取り精度</span>
+          <div class="meta">${state.settings.receiptRes === "std" ? "標準 (長辺1568px ・ 通信量少なめ)" : "高精度 (長辺2576px ・ 細かい文字に強い)"}</div></div>
+        <button class="icon-btn" data-action="receipt-res">⇄</button>
+      </div>
+    </div>
+    ${getApiKey() ? '<button class="btn-ghost danger" data-action="apikey-del">🗑 APIキーを削除</button>' : ""}
+    <div class="hint">※ レシートを撮影すると Claude が店名・金額・日付を読み取り、詳細入力に自動で入れます(保存前に確認できます)。<br>
+      ※ キーは<b>この端末のブラウザにのみ</b>保存されます。エクスポートしたJSONには含まれません。<br>
+      ※ 端末を共有している場合、その人もあなたのキーで課金できてしまいます。<br>
+      ※ 料金はご自身の Anthropic アカウントに発生します(1枚あたり およそ1〜3円)。<br>
+      　 <a href="https://platform.claude.com/" target="_blank" rel="noopener">Claude Console</a> で使用上限を設定しておくことをおすすめします。</div>
 
     <div class="sec-head">${ransomHtml("データ")}<div class="en">BACKUP</div></div>
     <button class="btn-ghost" data-action="export">⬇ データをエクスポート(JSONファイル保存)</button>
@@ -1373,6 +1855,11 @@ async function catRename(id) {
 }
 async function catDel(id) {
   const c = cat(id); if (!c) return;
+  // 割り勘カテゴリを全部消すと、割り勘が「ただの収入」になって予算がズレる
+  if (c.offsetExpense && state.categories.filter(x => x.offsetExpense).length <= 1) {
+    alertDialog("「割り勘(支出から差引)」のカテゴリは最低1つ必要なので削除できません。\n名前を変えたい場合は ✎ から変更してください。");
+    return;
+  }
   const used = state.transactions.filter(t => t.categoryId === id).length;
   if (!await confirmDialog(`カテゴリ「${c.name}」を削除しますか?` + (used ? `\n(使用中の${used}件の記録は「未分類」になります)` : ""), { danger: true, okText: "削除" })) return;
   state.categories = state.categories.filter(x => x.id !== id);
@@ -1394,7 +1881,10 @@ async function accEdit(id) {
   const v = await accountDialog(a);
   if (!v) return;
   a.name = v.name; a.group = v.group; a.kind = v.kind; a.initialBalance = v.initialBalance;
-  if (a.kind === "credit") { a.closingDay = v.closingDay; a.payDay = v.payDay; a.payFromId = v.payFromId; }
+  if (a.kind === "credit") {
+    a.closingDay = v.closingDay; a.payDay = v.payDay; a.payFromId = v.payFromId;
+    delete a.savings;                // クレカに貯蓄区分は無い
+  } else a.savings = v.savings;
   persist(); renderSettings(); toast("保存しました");
 }
 function accArchive(id) {
@@ -1422,6 +1912,7 @@ async function accAdd() {
   const a = { id: "acc-" + Date.now().toString(36), name: v.name, kind: v.kind, group: v.group,
     initialBalance: v.initialBalance, sortOrder: Math.max(0, ...state.accounts.map(a => a.sortOrder)) + 1, archived: false };
   if (a.kind === "credit") { a.closingDay = v.closingDay; a.payDay = v.payDay; a.payFromId = v.payFromId; }
+  else a.savings = v.savings;
   state.accounts.push(a);
   persist(); renderSettings(); toast("追加しました");
 }
@@ -1443,6 +1934,8 @@ function importData(file) {
       const d = JSON.parse(reader.result);
       if (!d || !Array.isArray(d.accounts) || !Array.isArray(d.categories) || !Array.isArray(d.transactions))
         throw new Error("家計簿のバックアップファイルではありません");
+      if (d.schemaVersion > SCHEMA_VERSION)
+        throw new Error(`このファイルは新しいバージョン(schema v${d.schemaVersion})で作られています。\nアプリを更新してから読み込んでください`);
       if (!await confirmDialog(`現在のデータを置き換えます。\n読み込む記録: ${d.transactions.length}件\nよろしいですか?`, { okText: "インポート" })) return;
       state = migrate(d);
       persist();
@@ -1462,11 +1955,16 @@ async function resetData() {
 }
 
 /* ---------------- ナビ・描画 ---------------- */
-function showScreen(id, keepEdit) {
-  if (id === "scr-input" && !keepEdit) {
+/* keepState: 呼び出し元が入力状態を組み立て済みのとき true(リセットしない) */
+function showScreen(id, keepState) {
+  if (id === "scr-input" && !keepState) {
+    // 「currentScreen !== scr-input のときだけ」にすると、詳細入力を開いたまま
+    // ＋を押し直しても状態が残る。常にリセットする
     editingId = null;
-    if (currentScreen !== "scr-input") { inputMode = "quick"; inputType = "expense"; selectedCatId = null; qAmount = ""; qCatId = null; }
+    inputMode = "detail"; inputType = "expense"; selectedCatId = null;
+    qAmount = ""; qRef = null; pendingPrefill = null; saveAsQuick = false;
   }
+  if (id === "scr-home") homeAnim = true;
   currentScreen = id;
   document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === id));
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.scr === id));
@@ -1480,12 +1978,264 @@ function render() {
   else if (currentScreen === "scr-history") renderHistory();
   else renderSettings();
 }
-function toast(msg) {
+/* toast(msg)                       … 従来どおり2秒表示
+   toast(msg, {actionLabel, onAction, ms}) … 取り消しボタン付き */
+function toast(msg, opt) {
+  opt = opt || {};
   const el = $("#toast");
-  el.textContent = msg;
+  toast._act = opt.onAction || null;
+  el.innerHTML = (opt.onAction ? `<span class="t-msg">${esc(msg)}</span>` : esc(msg))
+    + (opt.onAction
+      ? `<button class="t-act" data-action="toast-act">${esc(opt.actionLabel || "取り消し")}</button>` : "");
+  el.classList.toggle("act", !!opt.onAction);
   el.classList.add("show");
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => el.classList.remove("show"), 2000);
+  toast._t = setTimeout(hideToast, opt.ms || 2000);
+}
+function hideToast() {
+  clearTimeout(toast._t);
+  $("#toast").classList.remove("show", "act");
+  toast._act = null;
+}
+
+/* ================================================================
+   レシート読み取り (Claude API)
+   ブラウザから直接 api.anthropic.com を叩く。
+   anthropic-dangerous-direct-browser-access ヘッダで CORS が通る。
+   APIキーはユーザー自身のものを設定画面で登録してもらう(BYOK)。
+   ※ CSP を将来入れる場合は connect-src に https://api.anthropic.com が必要
+   ================================================================ */
+const RECEIPT_MODEL = "claude-sonnet-5";
+const RECEIPT_RES = { high: 2576, std: 1568 };   // 長辺の上限(px)
+const RECEIPT_JPEG_Q = 0.8;
+
+class RcpError extends Error {
+  constructor(msg, follow) { super(msg); this.follow = follow; }  // follow: "settings" | "manual"
+}
+
+/* アスペクト比を保ったまま長辺を maxEdge 以下に収める。拡大はしない */
+function fitSize(w, h, maxEdge) {
+  const s = Math.min(1, maxEdge / Math.max(w, h));
+  return { w: Math.max(1, Math.round(w * s)), h: Math.max(1, Math.round(h * s)) };
+}
+
+/* 画像を JPEG/base64 に正規化する。
+   - リサイズ: 送信前に縮小しておくとレイテンシとリクエストサイズが下がる
+   - EXIF: iPhone の横持ちは回転情報が入るので正立させる(倒れていると精度が落ちる)
+   - HEIC: canvas で再エンコードすることで JPEG に変換される(API は HEIC 非対応) */
+async function fileToJpegBase64(file, maxEdge, quality) {
+  let src, w0, h0;
+  try {
+    src = await createImageBitmap(file, { imageOrientation: "from-image" });
+    w0 = src.width; h0 = src.height;
+  } catch (e) {
+    src = await new Promise((res, rej) => {
+      const img = new Image(), url = URL.createObjectURL(file);
+      img.onload = () => { URL.revokeObjectURL(url); res(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new RcpError("画像を読み込めませんでした。")); };
+      img.src = url;
+    });
+    w0 = src.naturalWidth || src.width; h0 = src.naturalHeight || src.height;
+  }
+  if (!w0 || !h0) throw new RcpError("画像を読み込めませんでした。");
+  const fit = fitSize(w0, h0, maxEdge);
+  const cv = document.createElement("canvas");
+  cv.width = fit.w;
+  cv.height = fit.h;
+  const ctx = cv.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(src, 0, 0, cv.width, cv.height);
+  if (src.close) src.close();
+  // toDataURL は同期。toBlob + FileReader より非同期の段数が減り、失敗の仕方も減る
+  const url = cv.toDataURL("image/jpeg", quality);
+  cv.width = cv.height = 0;   // iOS Safari は canvas の解放が遅く、連続撮影で落ちることがある
+  const b64 = url.split(",")[1];
+  if (!b64) throw new RcpError("画像を変換できませんでした。");
+  return b64;
+}
+
+/* カテゴリはアプリの実データから enum を作る。ユーザーが追加したカテゴリにも対応する */
+function buildReceiptSchema() {
+  const ids = state.categories.filter(c => c.type === "expense").map(c => c.id);
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["is_receipt", "store", "total", "date", "category_id", "payment_hint", "confidence", "note"],
+    properties: {
+      is_receipt: { type: "boolean", description: "レシート/領収書として読み取れたか" },
+      store: { type: "string", description: "店名。読めなければ空文字" },
+      total: { type: "integer", description: "税込の支払合計(円)。読めなければ0" },
+      date: { type: "string", description: "YYYY-MM-DD形式。読めなければ空文字" },
+      category_id: { type: "string", enum: ids.concat([""]), description: "支出カテゴリID。判断できなければ空文字" },
+      payment_hint: { type: "string", enum: ["cash", "credit", "emoney", "unknown"] },
+      confidence: { type: "string", enum: ["high", "medium", "low"] },
+      note: { type: "string", description: "読めなかった項目や注意点を日本語1文で。無ければ空文字" }
+    }
+  };
+}
+const RECEIPT_SYSTEM = `日本のレシート/領収書の画像から、家計簿の支出記録を1件抽出する。
+
+- total は税込の実支払額。「合計」「お会計」「クレジット」「ご利用金額」を使う。
+  「小計」「お預り」「お釣り」「ポイント」は使わない。値引き・クーポン適用後の額を返す。
+- date は和暦も西暦に変換する(令和6年→2024)。年の記載が無ければ空文字を返す。
+- store は屋号のみ。「株式会社」「〜支店」「〜店」は省いてよい。
+- category_id は与えられた一覧から最も近いものを1つ選ぶ。迷ったら空文字。
+- payment_hint: 現金/お預り記載→cash、クレジット/カード/一括→credit、
+  PayPay・交通系IC・QR・電子マネー→emoney、判別不能→unknown。
+- 画像がレシートでない、または合計金額が読み取れない場合は is_receipt を false にし、
+  note に理由を日本語で1文書く。
+- 推測で数字を作らない。読めない項目は空文字/0 を返す。`;
+
+async function callReceiptApi(b64, signal) {
+  const key = getApiKey();
+  if (!key) throw new RcpError("Claude の APIキーが未設定です。", "settings");
+  if (!navigator.onLine) throw new RcpError("オフラインです。通信できる場所で試してください。");
+
+  const catList = state.categories.filter(c => c.type === "expense")
+    .map(c => `${c.id}=${c.name}`).join(" / ");
+
+  let res;
+  try {
+    res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST", signal,
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: RECEIPT_MODEL,
+        max_tokens: 800,
+        system: RECEIPT_SYSTEM,
+        // 読み取りは知覚タスクなので思考は不要。
+        // 既定のまま(adaptive)だと十数秒かかり体感が大きく変わる
+        thinking: { type: "disabled" },
+        output_config: { effort: "low", format: { type: "json_schema", schema: buildReceiptSchema() } },
+        messages: [{
+          role: "user",
+          content: [
+            // 画像はテキストより前に置くほうが精度が良い(公式ガイド)
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
+            { type: "text", text: "利用可能なカテゴリ:\n" + catList }
+          ]
+        }]
+      })
+    });
+  } catch (e) {
+    if (e.name === "AbortError") throw e;
+    throw new RcpError("通信に失敗しました。\n(オフライン、または通信がブロックされている可能性があります)");
+  }
+
+  if (!res.ok) {
+    let msg = "";
+    try { msg = (await res.json()).error.message; } catch (e) { /* 本文が読めなくても続行 */ }
+    if (res.status === 401) throw new RcpError("APIキーが正しくありません。設定を確認してください。", "settings");
+    if (res.status === 403) throw new RcpError("このAPIキーには権限がありません。", "settings");
+    if (res.status === 413) throw new RcpError("画像が大きすぎます。設定で読み取り精度を「標準」にしてお試しください。");
+    if (res.status === 429) {
+      const ra = res.headers.get("retry-after");
+      throw new RcpError(`リクエストが多すぎます。${ra ? ra + "秒" : "しばらく"}待ってから試してください。`);
+    }
+    if (res.status >= 500) throw new RcpError("Anthropic側が混雑しています。時間をおいてお試しください。");
+    throw new RcpError("エラー: " + (msg || res.status));
+  }
+
+  const j = await res.json();
+  if (j.stop_reason === "refusal") throw new RcpError("この画像は処理できませんでした。", "manual");
+  if (j.stop_reason === "max_tokens") throw new RcpError("読み取り結果が長すぎました。もう一度お試しください。");
+  // content[0] を無条件に読まない(thinking ブロック等が先頭に来ることがある)
+  const tb = (j.content || []).find(b => b && b.type === "text");
+  if (!tb) throw new RcpError("読み取り結果を受け取れませんでした。", "manual");
+  let d;
+  try { d = JSON.parse(tb.text); } catch (e) { throw new RcpError("読み取り結果を解釈できませんでした。", "manual"); }
+  if (!d.is_receipt || !d.total || d.total <= 0 || d.total > 10000000) {
+    throw new RcpError("レシートを読み取れませんでした。" + (d.note ? "\n" + d.note : "")
+      + "\n手入力で記録してください。", "manual");
+  }
+  return d;
+}
+
+/* 支払い方法の推定より、ユーザー自身の履歴のほうが確実なので過去の同名記録を最優先する */
+function guessAccount(hint, hist, name) {
+  if (hist) {
+    const ids = Object.keys(hist.amounts);
+    if (ids.length === 1 && acc(ids[0]) && !acc(ids[0]).archived) return ids[0];
+  }
+  const live = state.accounts.filter(a => !a.archived).sort((x, y) => x.sortOrder - y.sortOrder);
+  let a = null;
+  if (hint === "cash") a = live.find(x => x.group === "現金" || (x.kind === "asset" && /現金/.test(x.name)));
+  else if (hint === "credit") a = live.find(x => x.kind === "credit");
+  else if (hint === "emoney") a = live.find(x => x.group === "PayPay" || /PayPay|Suica|PASMO|楽天|iD|QUICPay/i.test(x.name));
+  return a ? a.id : defaultQuickAccount(name);
+}
+
+/* dialog() はユーザー操作でしか閉じられないので、閉じられる専用のオーバーレイを使う */
+function loadingOverlay(msg, onCancel) {
+  const ov = document.createElement("div");
+  ov.className = "modal-overlay";
+  ov.innerHTML = `<div class="modal" style="text-align:center">
+    <div class="rcp-spin"></div>
+    <p class="md-title" style="margin-top:14px">${esc(msg)}</p>
+    <div class="hint" id="rcp-slow" style="display:none">まだ処理中です…</div>
+    <div class="btns"><button class="cancel" data-md="c">キャンセル</button></div></div>`;
+  document.body.appendChild(ov);
+  const slow = setTimeout(() => { const e = ov.querySelector("#rcp-slow"); if (e) e.style.display = ""; }, 8000);
+  const close = () => { clearTimeout(slow); ov.remove(); };
+  // 背景タップでは閉じない(誤操作で処理が消えるのを防ぐ)
+  ov.addEventListener("click", e => { if (e.target.closest("[data-md]")) { close(); if (onCancel) onCancel(); } });
+  return { close };
+}
+
+async function runReceipt(file) {
+  if (!getApiKey()) {
+    if (await confirmDialog("レシートの読み取りには Claude の APIキーが必要です。\n設定画面で登録しますか?", { okText: "設定へ" }))
+      showScreen("scr-settings");
+    return;
+  }
+  const ctrl = new AbortController();
+  let cancelled = false;
+  const ld = loadingOverlay("レシートを読み取っています…", () => { cancelled = true; ctrl.abort(); });
+  try {
+    const maxEdge = state.settings.receiptRes === "std" ? RECEIPT_RES.std : RECEIPT_RES.high;
+    const b64 = await fileToJpegBase64(file, maxEdge, RECEIPT_JPEG_Q);
+    const d = await callReceiptApi(b64, ctrl.signal);
+    // 応答がキャンセルに競り勝つことがある。ここで見ないと
+    // キャンセルしたのに詳細入力へ飛ばされる
+    if (cancelled) return;
+    ld.close();
+    const hist = d.store ? lastTxByName(d.store) : null;
+    openPrefilledDetail({
+      date: /^\d{4}-\d{2}-\d{2}$/.test(d.date) ? d.date : todayStr(),
+      name: d.store || "",
+      categoryId: (hist && hist.type === "expense" && hist.categoryId)
+        || ((d.category_id && cat(d.category_id)) ? d.category_id : null)
+        || quickCategoryOf(d.store || ""),
+      accountId: guessAccount(d.payment_hint, hist, d.store || ""),
+      amount: d.total,
+      banner: "📷 レシートから自動入力しました。金額と日付を確認してください。"
+        + (d.confidence === "low" ? "\n⚠ 読み取りの確信度が低めです。" : "")
+        + (d.note ? "\n" + d.note : "")
+    });
+  } catch (e) {
+    ld.close();
+    if (cancelled || e.name === "AbortError") return;   // ユーザーがキャンセルしたときは静かに終わる
+    console.error(e);
+    const follow = e instanceof RcpError ? e.follow : null;
+    const r = await dialog({
+      html: `<p class="md-title">レシートを読み取れませんでした</p>
+        <p style="font-size:13px;line-height:1.7">${esc(e.message || String(e)).replace(/\n/g, "<br>")}</p>
+        <div class="btns">
+          <button class="cancel" data-md="c">閉じる</button>
+          ${follow === "settings" ? '<button class="ok" data-md="s">設定へ</button>'
+            : '<button class="ok" data-md="m">手入力する</button>'}
+        </div>`,
+      cancelValue: "c", autofocus: false,
+      onAction: (a, done) => done(a)
+    });
+    if (r === "s") showScreen("scr-settings");
+    else if (r === "m") { inputMode = "detail"; showScreen("scr-input"); }
+  }
 }
 
 /* ---------------- イベント ---------------- */
@@ -1497,29 +2247,36 @@ document.addEventListener("click", async e => {
     case "nav": showScreen(el.dataset.scr); break;
     case "month-prev": shiftMonth(-1); break;
     case "month-next": shiftMonth(1); break;
+    case "toast-act": { const f = toast._act; hideToast(); if (f) f(); break; }
     /* --- クイック入力 --- */
-    case "quick-name": qMode = "expense"; qName = el.dataset.name; qAccountId = defaultQuickAccount(qName); qAmount = ""; inputMode = "quick"; editingId = null; showScreen("scr-input", true); break;
     case "quick-charge":
-      qMode = "charge"; qAmount = qAmount || ""; inputMode = "quick"; editingId = null;
+      qMode = "charge"; qAmount = ""; qRef = null; inputMode = "quick"; editingId = null;
       if (currentScreen === "scr-input") renderQuick(); else showScreen("scr-input", true);
       break;
-    case "quick-warikan":
-      qMode = "warikan"; qAccountId = qAccountId || defaultQuickAccount(null); inputMode = "quick"; editingId = null;
+    case "quick-warikan": {
+      // 先に元記録を選ばせる。キャンセルなら画面を動かさない
+      const r = await warikanRefDialog();
+      if (r === null) break;
+      qMode = "warikan"; qRef = r.ref; qAmount = "";
+      qAccountId = qAccountId || defaultQuickAccount(null);
+      inputMode = "quick"; editingId = null;
       if (currentScreen === "scr-input") renderQuick(); else showScreen("scr-input", true);
       break;
-    case "quick-blank": qMode = "expense"; qName = null; qCatId = null; qAmount = ""; inputMode = "quick"; editingId = null; showScreen("scr-input", true); break;
+    }
+    case "w-all": qAmount = String(el.dataset.amt); renderQuick(); break;
     case "q-item": {
       const it = quickItemsList()[Number(el.dataset.idx)];
       if (!it) break;
-      qMode = "expense"; qName = it.name; qCatId = it.categoryId || null;
-      qAccountId = (it.accountId && acc(it.accountId) && !acc(it.accountId).archived) ? it.accountId : defaultQuickAccount(it.name);
-      if (currentScreen === "scr-input") renderQuick();
-      else { inputMode = "quick"; editingId = null; showScreen("scr-input", true); }
-      break;
-    }
-    case "q-free": {
-      const n = await promptDialog("記録の名前を入力", "");
-      if (n && n.trim()) { qMode = "expense"; qName = n.trim(); qCatId = null; qAccountId = defaultQuickAccount(qName); renderQuick(); }
+      const tx = quickTxFromItem(it);
+      if (!tx) { openPrefilledDetail(quickPrefillFromItem(it)); break; }
+      state.transactions.push(tx);
+      persist();
+      viewMonth = tx.date.slice(0, 7);
+      render();   // 今いる画面を再描画(ホームに留まる)
+      // 名前が長いとトーストが何行にもなるので詰める
+      const label = it.name.length > 12 ? it.name.slice(0, 12) + "…" : it.name;
+      toast(`${label} ${yen(Math.abs(Object.values(tx.amounts)[0]))}を記録`,
+        { ms: 5000, actionLabel: "取り消し", onAction: () => undoTx(tx.id) });
       break;
     }
     case "q-acc": qAccountId = id; renderQuick(); break;
@@ -1530,16 +2287,51 @@ document.addEventListener("click", async e => {
       break;
     }
     case "q-del": qAmount = qAmount.slice(0, -1); renderQuick(); break;
-    case "q-save": quickSave(); break;
-    case "to-detail": inputMode = "detail"; inputType = qMode === "charge" ? "transfer" : qMode === "warikan" ? "income" : "expense"; if (qMode === "warikan") selectedCatId = "warikan"; renderInput(); break;
-    case "to-quick": inputMode = "quick"; renderQuick(); break;
+    case "q-save": await quickSave(); break;
+    case "to-detail":
+      inputMode = "detail";
+      inputType = qMode === "charge" ? "transfer" : "income";
+      if (qMode === "warikan") selectedCatId = warikanCatId();
+      renderInput();
+      break;
     /* --- 詳細フォーム --- */
     case "set-type": {
-      const keep = { date: $("#in-date") && $("#in-date").value, name: $("#in-name") && $("#in-name").value };
+      // 種別を切り替えても、入力済みの日付・名前・金額は保持する
+      // (レシート読み取りの直後に誤って収入を押しても金額が消えないように)
+      const keep = {
+        date: $("#in-date") && $("#in-date").value,
+        name: $("#in-name") && $("#in-name").value,
+        amts: {}
+      };
+      state.accounts.forEach(a => {
+        const i = $("#amt-" + a.id);
+        if (i && i.value) keep.amts[a.id] = i.value;
+      });
       inputType = el.dataset.type;
       renderInput();
       if (keep.date && $("#in-date")) $("#in-date").value = keep.date;
       if (keep.name && $("#in-name")) $("#in-name").value = keep.name;
+      Object.keys(keep.amts).forEach(k => { const i = $("#amt-" + k); if (i) i.value = keep.amts[k]; });
+      break;
+    }
+    case "toggle-qreg": saveAsQuick = !saveAsQuick; renderInput(); break;
+    case "quick-from-tx": {
+      const t = state.transactions.find(x => x.id === id);
+      if (!t) break;
+      const ids = Object.keys(t.amounts);
+      const v = await quickItemDialog({
+        name: t.name,
+        categoryId: t.categoryId || null,
+        accountId: ids.length === 1 ? ids[0] : null,
+        amount: Math.round(txAmount(t)) || null
+      });
+      if (!v) break;
+      if (!isCustomQuick()) state.settings.quickItems = autoQuickItems(QUICK_MAX);
+      const arr = state.settings.quickItems;
+      const i = arr.findIndex(x => x.name === v.name);
+      if (i >= 0) arr[i] = v; else arr.unshift(v);
+      if (arr.length > 8) arr.length = 8;
+      persist(); render(); toast("クイックに登録しました");
       break;
     }
     case "set-cat":
@@ -1551,7 +2343,8 @@ document.addEventListener("click", async e => {
     case "edit-tx": openEdit(id); break;
     /* --- 設定 --- */
     case "quick-customize":
-      state.settings.quickItems = frequentNames(5).map(n => ({ name: n, categoryId: null, accountId: null }));
+      // いま自動で出ているチップをそのまま引き継ぐ(切り替えた瞬間に空になると驚く)
+      state.settings.quickItems = autoQuickItems(QUICK_MAX);
       persist(); renderSettings(); toast("カスタムに切り替えました");
       break;
     case "quick-auto":
@@ -1580,8 +2373,13 @@ document.addEventListener("click", async e => {
       break;
     }
     case "quick-up": {
-      const i = Number(el.dataset.idx);
-      if (i > 0) { const arr = state.settings.quickItems; [arr[i-1], arr[i]] = [arr[i], arr[i-1]]; persist(); renderSettings(); }
+      const i = Number(el.dataset.idx), arr = state.settings.quickItems;
+      if (i > 0) { [arr[i-1], arr[i]] = [arr[i], arr[i-1]]; persist(); renderSettings(); }
+      break;
+    }
+    case "quick-down": {
+      const i = Number(el.dataset.idx), arr = state.settings.quickItems;
+      if (i < arr.length - 1) { [arr[i+1], arr[i]] = [arr[i], arr[i+1]]; persist(); renderSettings(); }
       break;
     }
     case "budget-month": budgetMonth(); break;
@@ -1593,6 +2391,28 @@ document.addEventListener("click", async e => {
     case "acc-arch": accArchive(id); break;
     case "acc-del": accDel(id); break;
     case "acc-add": accAdd(); break;
+    /* --- レシート --- */
+    case "receipt-shot": $("#receipt-file").click(); break;
+    case "apikey-set": {
+      const v = await promptDialog("Claude の APIキーを貼り付け", "", { type: "password" });
+      if (v === null) break;
+      const k = v.trim();
+      if (k && !/^sk-ant-/.test(k) &&
+          !await confirmDialog("Anthropic のキーは通常 sk-ant- で始まります。\nこのまま保存しますか?", { okText: "保存" })) break;
+      setApiKey(k);
+      renderSettings();
+      toast(k ? "APIキーを保存しました" : "APIキーを削除しました");
+      break;
+    }
+    case "apikey-del":
+      if (await confirmDialog("保存したAPIキーを削除しますか?", { danger: true, okText: "削除" })) {
+        setApiKey(""); renderSettings(); toast("削除しました");
+      }
+      break;
+    case "receipt-res":
+      state.settings.receiptRes = state.settings.receiptRes === "std" ? "high" : "std";
+      persist(); renderSettings();
+      break;
     case "export": exportData(); break;
     case "import": $("#import-file").click(); break;
     case "reset": resetData(); break;
@@ -1601,6 +2421,10 @@ document.addEventListener("click", async e => {
 $("#import-file").addEventListener("change", e => {
   if (e.target.files.length) importData(e.target.files[0]);
   e.target.value = "";
+});
+$("#receipt-file").addEventListener("change", e => {
+  if (e.target.files.length) runReceipt(e.target.files[0]);
+  e.target.value = "";   // 同じ写真を続けて選んでも change が発火するように
 });
 
 /* ---------------- 起動 ---------------- */
