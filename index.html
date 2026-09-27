@@ -15,7 +15,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://api.anthropic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Reggae+One&family=Bangers&display=swap" rel="stylesheet">
+<!-- media="print" で読み込み、届いたら all に切り替える = 描画をブロックしない。
+     電波が弱いとき、フォントCSSを待って画面が真っ白のまま止まるのを防ぐ -->
+<link href="https://fonts.googleapis.com/css2?family=Reggae+One&family=Bangers&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Reggae+One&family=Bangers&display=swap" rel="stylesheet"></noscript>
 <title>家計簿</title>
 <style>
   :root {
@@ -384,6 +387,25 @@
   .wrow .wm { font-size:10px; color:var(--gray); font-weight:700; }
   .wrow .wr { font-size:10px; color:var(--red2); font-weight:800; text-align:right; }
 
+  /* ===== v4.1: 明細CSVの取り込み確認 ===== */
+  .isum { font-size:11px; color:var(--gray); font-weight:700; line-height:1.6; }
+  .ilist { max-height:46vh; overflow-y:auto; margin:10px 0; }
+  .irow { display:flex; gap:9px; align-items:flex-start; padding:8px 4px; border-bottom:1px solid #2a2a2a; }
+  .irow.off { opacity:.45; }
+  .modal .irow input[type=checkbox] { width:20px; height:20px; padding:0; margin-top:2px; flex:none;
+    appearance:auto; -webkit-appearance:checkbox; accent-color:var(--red); }
+  .irow .ib { flex:1; min-width:0; }
+  .irow .it { display:flex; gap:8px; align-items:baseline; }
+  .irow .in { flex:1; min-width:0; font-weight:900; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .irow .iv { font-size:14px; flex:none; }
+  .irow .iv.inc { color:var(--cyan); }
+  .irow .im { display:flex; gap:6px; align-items:center; font-size:10px; color:var(--gray); font-weight:700; margin-top:4px; min-width:0; }
+  .irow .im span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .modal .irow select { width:auto; flex:1; min-width:0; padding:3px 6px; font-size:11px; border-width:1px; }
+  .irow .inote { font-size:10px; color:var(--red2); font-weight:800; margin-top:3px; }
+  .irow-tools { display:flex; gap:8px; }
+  .irow-tools .btn-ghost { flex:1; justify-content:center; margin:0; font-size:11px; padding:9px 6px; }
+
   /* ===== v4: 履歴行のクイック登録ボタン ===== */
   .tx-q { background:transparent; border:2px solid #3a3a3a; color:var(--white); flex-shrink:0;
     width:30px; height:30px; font-size:13px; cursor:pointer; margin-left:2px; }
@@ -434,6 +456,7 @@
 
 <div id="toast"></div>
 <input type="file" id="import-file" accept=".json,application/json" hidden>
+<input type="file" id="csv-file" accept=".csv,text/csv,text/comma-separated-values" hidden>
 <!-- capture="environment" は付けない。iOS で指定するとカメラ直起動になり、
      フォトライブラリから選べなくなる(後でまとめて入力する使い方ができない) -->
 <input type="file" id="receipt-file" accept="image/*" hidden>
@@ -441,8 +464,8 @@
 <script>
 "use strict";
 /* ================================================================
-   家計簿アプリ v4.0 — ペルソナ5スタイル
-   - localStorage("kakeibo-data") / schemaVersion 5
+   家計簿アプリ v4.1 — ペルソナ5スタイル
+   - localStorage("kakeibo-data") / schemaVersion 6
    - エクスポート / インポートで引き継ぎ
    - APIキーだけは localStorage("kakeibo-apikey") に分離して保存する。
      state に入れるとエクスポートしたJSONに平文で載ってしまうため。
@@ -452,8 +475,8 @@ const SEED_DATA = null; // 公開版: 個人データは含めない
 
 const STORAGE_KEY = "kakeibo-data";
 const APIKEY_KEY = "kakeibo-apikey";
-const APP_VERSION = "4.0";
-const SCHEMA_VERSION = 5;
+const APP_VERSION = "4.1";
+const SCHEMA_VERSION = 6;
 
 // SEED_DATA が null の場合(公開版)の初期データ
 const DEFAULT_DATA = {
@@ -537,6 +560,17 @@ function migrate(d) {
       if (a.kind !== "credit" && a.savings === undefined) a.savings = false;
     });
     d.schemaVersion = 5;
+  }
+  if (d.schemaVersion === 5) {
+    // v6: 明細CSVの取り込み。口座ごとのCSV形式(null = 自動判定)
+    // 取り込んだ記録には importId が付く(再取り込み時の重複除外用)
+    const known = { paypay:"paypay", sumishin:"smbc_net", aozora:"aozora", smcc_card:"smcc" };
+    d.accounts.forEach(a => {
+      if (a.importFormat === undefined) a.importFormat = known[a.id] || null;
+      // 住信SBIネット銀行 → ドコモSMBCネット銀行 に行名変更。自分で付けた名前は触らない
+      if (a.name === "住信SBIネット銀行") a.name = "ドコモSMBCネット銀行";
+    });
+    d.schemaVersion = 6;
   }
   // 将来のアップデートでデータ形式を変えるときは、ここに変換処理を追加する
   return d;
@@ -669,6 +703,9 @@ function accountDialog(a) {
         <label>支払日(締め日の翌月)</label><select id="md-pay">${paySel(a && a.payDay)}</select>
         <label>引き落とし口座(残高チェックに使用)</label><select id="md-from">${fromSel(a && a.payFromId)}</select>
       </div>
+      <label>明細CSVの形式(取り込み用)</label>
+      <select id="md-fmt">${Object.keys(CSV_FORMATS).map(k =>
+        `<option value="${k}" ${((a && a.importFormat) || "auto") === k ? "selected" : ""}>${esc(CSV_FORMATS[k].label)}</option>`).join("")}</select>
       <div class="btns"><button class="cancel" data-md="c">キャンセル</button><button class="ok" data-md="ok">${isNew ? "追加" : "保存"}</button></div>`,
     cancelValue: null, autofocus: false,
     onOpen: ov => {
@@ -690,7 +727,8 @@ function accountDialog(a) {
         savings: ov.querySelector("#md-savings").value === "savings",
         closingDay: Number(ov.querySelector("#md-close").value),
         payDay: Number(ov.querySelector("#md-pay").value),
-        payFromId: ov.querySelector("#md-from").value || null
+        payFromId: ov.querySelector("#md-from").value || null,
+        importFormat: ov.querySelector("#md-fmt").value === "auto" ? null : ov.querySelector("#md-fmt").value
       });
     }
   });
@@ -1797,6 +1835,24 @@ function renderSettings() {
     <div class="hint">※ 📦 = 使わなくなった口座を入力画面から非表示に(過去の記録はそのまま)。クレカは ✎ から締め日・支払日・引き落とし口座を変更。<br>
       ※ ✎ の「区分」を<b>貯蓄</b>にすると、ホームの「使えるお金」から除かれます(総資産には含まれます)。</div>
 
+    <div class="sec-head">${ransomHtml("明細取込")}<div class="en">CSV IMPORT</div></div>
+    <div class="set-list">
+      ${accs.filter(a => !a.archived).map(a => {
+        const f = CSV_FORMATS[a.importFormat || "auto"] || CSV_FORMATS.auto;
+        const n = state.transactions.filter(t => t.importId && t.amounts[a.id] !== undefined).length;
+        return `<div class="set-item">
+          <span>${accIcon(a)}</span>
+          <div class="grow"><span class="nm">${esc(a.name)}</span>
+            <div class="meta">${esc(f.label)}${n ? ` ・ 取込済み ${n}件` : ""}</div></div>
+          <button class="icon-btn" data-action="csv-import" data-id="${a.id}">⬆</button>
+        </div>`;
+      }).join("")}
+    </div>
+    <div class="hint">※ 銀行・カード・PayPay の<b>入出金明細CSV</b>を ⬆ から選ぶと、記録に変換して取り込みます(取り込む前に一覧で確認できます)。<br>
+      ※ 同じCSVを何度読み込んでも二重にはなりません。手入力した記録と同じ日・同じ金額のものはチェックを外した状態で表示します。<br>
+      ※ カードの引き落としや PayPay チャージ、ATM出金は、相手の口座との「振替」として記録します。<br>
+      ※ 形式は口座の ✎ から変更できます。列が読み取れないCSVは、どの列が日付・金額かを選んで取り込めます。</div>
+
     <div class="sec-head">${ransomHtml("レシート")}<div class="en">RECEIPT AI</div></div>
     <div class="set-list">
       <div class="set-item"><span>🔑</span>
@@ -1881,6 +1937,7 @@ async function accEdit(id) {
   const v = await accountDialog(a);
   if (!v) return;
   a.name = v.name; a.group = v.group; a.kind = v.kind; a.initialBalance = v.initialBalance;
+  a.importFormat = v.importFormat;
   if (a.kind === "credit") {
     a.closingDay = v.closingDay; a.payDay = v.payDay; a.payFromId = v.payFromId;
     delete a.savings;                // クレカに貯蓄区分は無い
@@ -1910,7 +1967,8 @@ async function accAdd() {
   const v = await accountDialog(null);
   if (!v) return;
   const a = { id: "acc-" + Date.now().toString(36), name: v.name, kind: v.kind, group: v.group,
-    initialBalance: v.initialBalance, sortOrder: Math.max(0, ...state.accounts.map(a => a.sortOrder)) + 1, archived: false };
+    initialBalance: v.initialBalance, sortOrder: Math.max(0, ...state.accounts.map(a => a.sortOrder)) + 1, archived: false,
+    importFormat: v.importFormat };
   if (a.kind === "credit") { a.closingDay = v.closingDay; a.payDay = v.payDay; a.payFromId = v.payFromId; }
   else a.savings = v.savings;
   state.accounts.push(a);
@@ -2238,6 +2296,415 @@ async function runReceipt(file) {
   }
 }
 
+/* ================================================================
+   明細CSVの取り込み (v4.1)
+   銀行・カード・PayPay の API は個人のサイトからは使えないので、
+   各社のサイト/アプリからダウンロードした入出金明細CSVを読み込む。
+   列名は各社で違い、予告なく変わることもあるので形式を決め打ちせず、
+   ヘッダのキーワードで列を探す → 見つからなければユーザーに列を選んでもらう。
+   ================================================================ */
+const CSV_FORMATS = {
+  auto:     { label: "自動判定", howto: "入出金明細・利用明細のCSVをそのまま選んでください。" },
+  paypay:   { label: "PayPay", howto: "PayPayアプリの「取引履歴」からCSVをダウンロードしてください(アプリの版によって場所が異なります)。" },
+  smbc_net: { label: "ドコモSMBCネット銀行", howto: "Webサイトにログイン →「入出金明細」→ 期間を指定してCSVをダウンロードしてください。" },
+  aozora:   { label: "あおぞら銀行", howto: "あおぞら銀行のWebサイトにログイン →「入出金明細」→ CSVをダウンロードしてください。" },
+  smcc:     { label: "三井住友カード(Vpass)", howto: "Vpass →「ご利用明細」→ CSVで保存してください。スマホではブラウザの「PC用サイトを表示」が必要な場合があります。" }
+};
+// 振替の相手口座を明細の文面から探すためのキーワード(NFKC + 小文字化した文字列に当てる)
+const CSV_ALIASES = {
+  paypay:   /paypay(?!カード|銀行)|ペイペイ(?!カード|ギンコウ)/,
+  smbc_net: /住信|スミシン|ドコモsmbc|ドコモ・?エスエムビーシー/,
+  aozora:   /あおぞら|アオゾラ/,
+  smcc:     /三井住友カ|ミツイスミトモカ|smbcカード|vpass/
+};
+// ヘッダ名から列の役割を判定する(空白を除いたヘッダ名に当てる)
+const CSV_COL = {
+  date:   c => /日付|取引日|利用日|年月日|取扱日|約定日/.test(c) && !/締|支払日|引落日/.test(c),
+  store:  c => /取引先|利用店|ご利用先|店名|加盟店/.test(c),
+  desc:   c => /摘要|内容|明細|取引名/.test(c) && !/メモ/.test(c),
+  out:    c => /出金|お支払|支払金額|お引出|引出|利用金額|引落|支出/.test(c) && !/海外|区分|方法|回数|予定|残高|手数料/.test(c),
+  in:     c => /入金|お預入|お預り|預入|受取|収入/.test(c) && !/海外|区分|方法|残高/.test(c),
+  amount: c => /^(お?取引)?金額(\(円\))?$/.test(c),
+  method: c => /取引方法|支払方法|支払い方法|決済方法/.test(c)
+};
+// 名前からのカテゴリ推定(過去に同じ名前の記録が無いときだけ使う)。上から順に判定
+const CSV_CAT_RULES = [
+  ["subsc", /netflix|spotify|apple\.com|apple com|itunes|youtube|amazon ?prime|プライム会費|disney|u-next|dazn|abema|chatgpt|openai|anthropic|claude|adobe|icloud/],
+  ["transport", /jr|鉄道|メトロ|電鉄|バス|タクシー|suica|pasmo|icoca|eneos|出光|コスモ石油|駐車場|高速道路/],
+  ["fun", /steam|任天堂|nintendo|playstation|映画|toho|シネマ|カラオケ|ラウンドワン|チケット/],
+  ["health", /薬局|ドラッグ|マツモトキヨシ|マツキヨ|ウエルシア|スギ薬局|サンドラッグ|ツルハ|ココカラ|クリニック|病院|医院|歯科/],
+  ["daily", /ダイソー|セリア|キャンドゥ|ニトリ|無印|ロフト|ハンズ|ドン・?キホーテ|ドンキ/],
+  ["fashion", /ユニクロ|uniqlo|zara|しまむら|h&m/],
+  ["beauty", /美容|ヘアサロン|hair|salon/],
+  ["food", /セブン|ローソン|ファミリーマート|ファミマ|ミニストップ|マクドナルド|スターバックス|スタバ|すき家|吉野家|松屋|ケンタッキー|サイゼリヤ|ガスト|モスバーガー|スシロー|くら寿司|はま寿司|イオン|まいばすけっと|西友|業務スーパー|オーケー|uber ?eats|出前館|wolt/]
+];
+
+let csvTargetId = null;   // どの口座に取り込むか(ファイル選択の間だけ保持)
+
+const nk = s => String(s == null ? "" : s).normalize("NFKC").trim();   // 全角英数・半角カナをそろえる
+
+async function readCsvFile(file) {
+  const buf = await file.arrayBuffer();
+  let text = new TextDecoder("utf-8").decode(buf);
+  // 銀行のCSVは Shift_JIS が多い。UTF-8 として読めなければ読み直す
+  if (text.indexOf("�") >= 0) {
+    try { text = new TextDecoder("shift_jis").decode(buf); } catch (e) { /* 非対応ブラウザは UTF-8 のまま */ }
+  }
+  return text.replace(/^﻿/, "");
+}
+/* ダブルクォート・カンマ・改行入りのセルに対応。タブ区切りも自動判定 */
+function parseCsv(text) {
+  const head = text.slice(0, 2000);
+  const delim = head.split("\t").length > head.split(",").length ? "\t" : ",";
+  const rows = [];
+  let row = [], cell = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+      else cell += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === delim) { row.push(cell); cell = ""; }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell); rows.push(row); row = []; cell = "";
+    } else cell += ch;
+  }
+  if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(c => c.trim() !== ""));
+}
+function csvDate(s) {
+  const t = nk(s);
+  const m = t.match(/(\d{4})\s*[\/\-.年]\s*(\d{1,2})\s*[\/\-.月]\s*(\d{1,2})/) || t.match(/^(\d{4})(\d{2})(\d{2})(?!\d)/);
+  if (!m) return null;
+  const y = +m[1], mo = +m[2], d = +m[3];
+  if (y < 2000 || y > 2100 || mo < 1 || mo > 12 || d < 1 || d > lastDay(y, mo)) return null;
+  return y + "-" + String(mo).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+}
+function csvAmount(s) {
+  let t = nk(s).replace(/[¥,円\s]/g, "");
+  let neg = false;
+  if (/^[-−▲△]/.test(t)) { neg = true; t = t.slice(1); }
+  else if (/^\(.*\)$/.test(t)) { neg = true; t = t.slice(1, -1); }
+  if (!/^\d+(\.\d+)?$/.test(t)) return null;
+  return neg ? -Number(t) : Number(t);
+}
+function csvHash(s) {
+  let h1 = 5381, h2 = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = ((h1 << 5) + h1 + c) | 0;
+    h2 = Math.imul(h2 ^ c, 16777619);
+  }
+  return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36);
+}
+const dayDiff = (a, b) => Math.abs(new Date(a) - new Date(b)) / 864e5;
+
+/* 列の割り当て m:
+   { headerRow, date, store, desc:[], out, in, amount, method, spendPositive }
+   out/in = 出金/入金の列、amount = 符号付き1列(spendPositive ならプラスが支出) */
+function detectCsvColumns(rows, a) {
+  for (let h = 0; h < Math.min(rows.length, 15); h++) {
+    const cells = rows[h].map(c => nk(c).replace(/\s/g, ""));
+    const find = test => cells.findIndex(test);
+    const m = { headerRow: h, date: find(CSV_COL.date), store: find(CSV_COL.store), desc: [],
+      out: find(CSV_COL.out), in: find(CSV_COL.in), amount: find(CSV_COL.amount), method: find(CSV_COL.method),
+      spendPositive: a.kind === "credit" };
+    if (m.date < 0 || (m.out < 0 && m.in < 0 && m.amount < 0)) continue;
+    cells.forEach((c, i) => { if (CSV_COL.desc(c) && i !== m.store && i !== m.method) m.desc.push(i); });
+    if (m.out >= 0 || m.in >= 0) m.amount = -1;
+    if (m.store < 0 && !m.desc.length) {
+      // 内容の列名が分からない → 日付・金額以外で最初の見出しありの列を内容とみなす
+      const i = cells.findIndex((c, i) => c && ![m.date, m.out, m.in, m.amount].includes(i));
+      if (i >= 0) m.store = i;
+    }
+    return m;
+  }
+  // ヘッダ無し(三井住友カード Vpass): 利用日, 利用店名, 利用金額, 支払区分, …
+  const dated = rows.filter(r => csvDate(r[0])).length;
+  const ok = rows.filter(r => csvDate(r[0]) && nk(r[1]) && csvAmount(r[2]) !== null).length;
+  if (ok && ok >= dated * 0.8)
+    return { headerRow: -1, date: 0, store: 1, desc: [], out: 2, in: -1, amount: -1, method: -1, spendPositive: true };
+  return null;
+}
+/* CSVの行 → {date, flow, name, text, method}。flow はその口座から見た増減(マイナス = 出ていった) */
+function csvRecords(rows, m) {
+  const out = [];
+  for (let i = m.headerRow + 1; i < rows.length; i++) {
+    const r = rows[i];
+    const date = csvDate(r[m.date]);
+    if (!date) continue;   // 合計行・注記行など
+    const vo = m.out >= 0 ? csvAmount(r[m.out]) : null;
+    const vi = m.in >= 0 ? csvAmount(r[m.in]) : null;
+    let flow = 0;
+    if (vo) flow = -vo;    // 出金列のマイナス(返金)はプラスになる
+    else if (vi) flow = vi;
+    else if (m.amount >= 0) { const v = csvAmount(r[m.amount]); if (v) flow = m.spendPositive ? -v : v; }
+    flow = Math.round(flow);
+    if (!flow) continue;
+    const store = m.store >= 0 ? nk(r[m.store]) : "";
+    const desc = m.desc.map(k => nk(r[k])).filter(Boolean);
+    const name = (store || desc[0] || "").replace(/\s+/g, " ").slice(0, 40) || (flow < 0 ? "支出" : "収入");
+    out.push({ date, flow, name, text: [store].concat(desc).join(" "), method: m.method >= 0 ? nk(r[m.method]) : "" });
+  }
+  return out;
+}
+
+function accountAliases(a) {
+  const res = [];
+  if (CSV_ALIASES[a.importFormat]) res.push(CSV_ALIASES[a.importFormat]);
+  if (a.id === "paypay_card" || /paypayカード/i.test(nk(a.name))) res.push(/paypayカ|ペイペイカ/);
+  if (a.group === "現金") res.push(/atm|現金|ゲンキン|セブン銀行|ローソン銀行|イーネット/);
+  const nm = nk(a.name).toLowerCase();
+  // 形式のキーワードがある口座は名前では探さない(「PayPay」が「PayPayカード」に当たってしまう)
+  if (!CSV_ALIASES[a.importFormat] && nm.length >= 3 && !/^(銀行|現金|クレジットカード)$/.test(nm))
+    res.push(new RegExp(nm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  return res;
+}
+/* 明細の文面に出てくる自分の別口座を探す(カード引き落とし・チャージ・ATM など) */
+function findAccountIn(text, selfId) {
+  const t = nk(text).toLowerCase();
+  if (!t) return null;
+  // カードを先に見る(「PayPayカード」を PayPay と取り違えないため)
+  const list = state.accounts.filter(a => a.id !== selfId && !a.archived)
+    .sort((x, y) => (y.kind === "credit") - (x.kind === "credit") || x.sortOrder - y.sortOrder);
+  return list.find(a => accountAliases(a).some(re => re.test(t))) || null;
+}
+/* この口座へ直近でチャージした元の口座(クレカ以外)。明細に「チャージ」としか無いとき用 */
+function lastChargeSource(toId) {
+  let best = null;
+  state.transactions.forEach(t => {
+    if (t.type !== "transfer" || !(t.amounts[toId] > 0)) return;
+    const from = Object.keys(t.amounts).find(k => k !== toId && t.amounts[k] < 0 && acc(k) && acc(k).kind !== "credit");
+    if (from && (!best || t.date >= best.date)) best = { date: t.date, id: from };
+  });
+  return best ? acc(best.id) : null;
+}
+function guessCsvCategory(name, type) {
+  const h = lastTxByName(name);
+  if (h && h.type === type && h.categoryId && cat(h.categoryId)) return h.categoryId;
+  const t = nk(name).toLowerCase();
+  if (type === "income") {
+    if (/給与|給料|賞与|ボーナス|キュウヨ|ショウヨ/.test(t) && cat("salary")) return "salary";
+    return cat("misc_in") ? "misc_in" : null;
+  }
+  const r = CSV_CAT_RULES.find(x => cat(x[0]) && x[1].test(t));
+  return r ? r[0] : (cat("other") ? "other" : null);
+}
+
+/* 取り込み候補を作る。c.skip があるものは一覧に出さない(件数だけ表示) */
+function csvCandidates(recs, a) {
+  const seen = {};
+  const used = new Set();   // 手入力の記録は1件につき1行とだけ突き合わせる
+  const txOf = (t, from, to, v) => Math.abs(t.amounts[from] || 0) === v && Math.abs(t.amounts[to] || 0) === v;
+  return recs.map(r => {
+    const base = [a.id, r.date, r.flow, r.name].join("|");
+    seen[base] = (seen[base] || 0) + 1;   // 同じ日・同じ店・同じ額が2回あっても別物として扱う
+    const c = Object.assign({}, r, { importId: "csv-" + csvHash(base + "|" + seen[base]), check: true, note: "", skip: null });
+    if (state.transactions.some(t => t.importId === c.importId)) { c.skip = "done"; return c; }
+
+    // PayPay: 残高以外(クレジット等)での支払いは PayPay残高を減らさない
+    // (チャージ・受け取りなどは取引方法が空欄や「-」なので対象外)
+    let payer = a;
+    if (r.flow < 0 && r.method && !/^[-−ー]?$/.test(r.method) && !/残高|マネー|ポイント/.test(r.method)) {
+      const card = findAccountIn(r.method, a.id);
+      if (!card) { c.skip = "other"; return c; }
+      payer = card;
+      c.check = false;
+      c.note = `${r.method}での支払い(カード明細も取り込むなら不要)`;
+    }
+
+    const v = Math.abs(r.flow);
+    let other = payer === a ? findAccountIn(r.text, a.id) : null;
+    const isCharge = !other && r.flow > 0 && /チャージ/.test(r.text);
+    if (isCharge) other = lastChargeSource(a.id);
+    if (other) {
+      const from = r.flow < 0 ? a : other, to = r.flow < 0 ? other : a;
+      c.tx = { type: "transfer", categoryId: null, name: r.name,
+        amounts: { [from.id]: from.kind === "credit" ? v : -v, [to.id]: to.kind === "credit" ? -v : v } };
+      c.route = `${from.name} → ${to.name}`;
+      // 相手の口座のCSVで取り込み済み、または手入力済みの振替
+      const dup = state.transactions.find(t => t.type === "transfer" && !used.has(t.id) && txOf(t, from.id, to.id, v) && dayDiff(t.date, r.date) <= 3);
+      if (dup) {
+        used.add(dup.id);
+        if (dup.importId) { c.skip = "pair"; return c; }
+        c.check = false; c.note = `手入力済みかも: ${dup.date.slice(5).replace("-", "/")} ${dup.name}`;
+      }
+      return c;
+    }
+    const type = r.flow < 0 ? "expense" : "income";
+    const amt = type === "expense" ? (payer.kind === "credit" ? v : -v) : (payer.kind === "credit" ? -v : v);
+    c.tx = { type, categoryId: guessCsvCategory(r.name, type), name: r.name, amounts: { [payer.id]: amt } };
+    if (isCharge) {
+      // チャージ元が分からないまま収入にすると収入が水増しされるので、確認してもらう
+      c.check = false; c.note = "チャージ元の口座が分かりません(振替として手入力をおすすめ)";
+      return c;
+    }
+    const dup = state.transactions.find(t => !t.importId && !used.has(t.id) && t.type === type && t.amounts[payer.id] === amt && dayDiff(t.date, r.date) <= 2);
+    if (dup) {
+      used.add(dup.id);
+      c.check = false; c.note = `手入力済みかも: ${dup.date.slice(5).replace("-", "/")} ${dup.name}`;
+    }
+    return c;
+  });
+}
+
+/* 列を自動で判定できなかったとき、ユーザーに選んでもらう */
+function csvMappingDialog(rows, a) {
+  const width = Math.max(...rows.slice(0, 30).map(r => r.length));
+  const sample = rows.find(r => r.some(c => csvDate(c))) || rows[0];
+  const gDate = sample.findIndex(c => csvDate(c));
+  const gAmt = sample.findIndex((c, i) => i !== gDate && csvAmount(c) !== null);
+  const gName = sample.findIndex((c, i) => i !== gDate && i !== gAmt && nk(c) && csvAmount(c) === null);
+  const opts = (sel, none) => (none ? `<option value="-1" ${sel < 0 ? "selected" : ""}>(なし)</option>` : "")
+    + Array.from({ length: width }, (_, i) =>
+      `<option value="${i}" ${sel === i ? "selected" : ""}>${i + 1}列目: ${esc(nk(sample[i] || "").slice(0, 14))}</option>`).join("");
+  return dialog({
+    html: `<p class="md-title">列を選んでください</p>
+      <p style="font-size:12px">「${esc(a.name)}」のCSVの形式を自動で判定できませんでした。どの列が何かを選んでください。</p>
+      <label>日付</label><select id="mp-date">${opts(gDate, false)}</select>
+      <label>内容(店名・摘要)</label><select id="mp-name">${opts(gName, true)}</select>
+      <label>金額(出金・支払い)</label><select id="mp-out">${opts(gAmt, false)}</select>
+      <label>入金の列(出金と別の列の場合)</label><select id="mp-in">${opts(-1, true)}</select>
+      <label>金額が1列のとき、プラスの金額は</label>
+      <select id="mp-sign"><option value="spend" ${a.kind === "credit" ? "selected" : ""}>支出(使ったお金)</option>
+        <option value="flow" ${a.kind !== "credit" ? "selected" : ""}>入金(マイナスが出金)</option></select>
+      <div class="btns"><button class="cancel" data-md="c">キャンセル</button><button class="ok" data-md="ok">次へ</button></div>`,
+    cancelValue: null, autofocus: false,
+    onAction: (act, done, ov) => {
+      if (act !== "ok") { done(null); return; }
+      const g = id => Number(ov.querySelector(id).value);
+      const inCol = g("#mp-in");
+      done({ headerRow: -1, date: g("#mp-date"), store: g("#mp-name"), desc: [], method: -1,
+        out: inCol >= 0 ? g("#mp-out") : -1, in: inCol, amount: inCol >= 0 ? -1 : g("#mp-out"),
+        spendPositive: ov.querySelector("#mp-sign").value === "spend" });
+    }
+  });
+}
+
+/* 取り込む前の確認一覧。返り値: 選ばれた候補の配列 / "remap"(列を選び直す) / null */
+function csvPreviewDialog(a, cands) {
+  const list = cands.filter(c => !c.skip).sort((x, y) => y.date.localeCompare(x.date));
+  const cnt = k => cands.filter(c => c.skip === k).length;
+  const skipped = [cnt("done") && `取り込み済み ${cnt("done")}件`, cnt("pair") && `相手口座で記録済みの振替 ${cnt("pair")}件`,
+    cnt("other") && `残高以外での支払い ${cnt("other")}件`].filter(Boolean);
+  const catOpts = c => state.categories.filter(x => x.type === c.tx.type).sort((x, y) => x.sortOrder - y.sortOrder)
+    .map(x => `<option value="${x.id}" ${c.tx.categoryId === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("");
+  const rowHtml = (c, i) => {
+    const out = c.tx.type === "expense" || (c.tx.type === "transfer" && c.flow < 0);
+    return `<div class="irow ${c.check ? "" : "off"}" id="ir-${i}">
+      <input type="checkbox" data-i="${i}" ${c.check ? "checked" : ""}>
+      <div class="ib">
+        <div class="it"><span class="in">${esc(c.tx.name)}</span><span class="iv num ${out ? "" : "inc"}">${out ? "-" : "+"}${yen(c.flow)}</span></div>
+        <div class="im"><span>${esc(c.date.slice(5).replace("-", "/"))}</span>
+          ${c.tx.type === "transfer" ? `<span>🔁 ${esc(c.route)}</span>` : `<select data-ci="${i}">${catOpts(c)}</select>`}</div>
+        ${c.note ? `<div class="inote">⚠ ${esc(c.note)}</div>` : ""}
+      </div></div>`;
+  };
+  const okLabel = () => `取り込む(${list.filter(c => c.check).length}件)`;
+  return dialog({
+    html: `<p class="md-title">${esc(a.name)} の明細</p>
+      <div class="isum">新しい記録 ${list.length}件${skipped.length ? "<br>除外: " + esc(skipped.join(" / ")) : ""}</div>
+      ${list.length ? `<div class="ilist">${list.map(rowHtml).join("")}</div>
+        <div class="irow-tools"><button class="btn-ghost" data-md="all">☑ 全部選ぶ / 外す</button>
+          <button class="btn-ghost" data-md="remap">⇄ 列を選び直す</button></div>`
+        : `<div class="empty">新しく取り込む記録はありません</div><button class="btn-ghost" data-md="remap">⇄ 列を選び直す</button>`}
+      <div class="btns"><button class="cancel" data-md="c">キャンセル</button>
+        ${list.length ? `<button class="ok" data-md="ok" id="ip-ok">${okLabel()}</button>` : ""}</div>`,
+    cancelValue: null, autofocus: false,
+    onOpen: ov => {
+      ov.addEventListener("change", e => {
+        const el = e.target;
+        if (el.dataset.i !== undefined) {
+          const c = list[Number(el.dataset.i)];
+          c.check = el.checked;
+          ov.querySelector("#ir-" + el.dataset.i).classList.toggle("off", !c.check);
+          ov.querySelector("#ip-ok").textContent = okLabel();
+        } else if (el.dataset.ci !== undefined) {
+          list[Number(el.dataset.ci)].tx.categoryId = el.value;
+        }
+      });
+    },
+    onAction: (act, done, ov) => {
+      if (act === "c") done(null);
+      else if (act === "remap") done("remap");
+      else if (act === "all") {
+        const on = !list.every(c => c.check);
+        list.forEach((c, i) => {
+          c.check = on;
+          ov.querySelector(`[data-i="${i}"]`).checked = on;
+          ov.querySelector("#ir-" + i).classList.toggle("off", !on);
+        });
+        ov.querySelector("#ip-ok").textContent = okLabel();
+      } else if (act === "ok") {
+        const picked = list.filter(c => c.check);
+        if (!picked.length) { toast("取り込む記録を選んでください"); return; }
+        done(picked);
+      }
+    }
+  });
+}
+
+/* ⬆ を押したとき: 取り方の案内を出してからファイルを選ばせる */
+function csvStart(accId) {
+  const a = acc(accId); if (!a) return;
+  const f = CSV_FORMATS[a.importFormat || "auto"] || CSV_FORMATS.auto;
+  return dialog({
+    html: `<p class="md-title">${esc(a.name)} の明細を取り込む</p>
+      <p style="font-size:12px;line-height:1.7">${esc(f.howto)}</p>
+      <div class="hint">形式: ${esc(f.label)}(口座の ✎ で変更できます)</div>
+      <div class="btns"><button class="cancel" data-md="c">キャンセル</button><button class="ok" data-md="ok">CSVを選ぶ</button></div>`,
+    cancelValue: null, autofocus: false,
+    onAction: (act, done) => {
+      // iOS はタップの処理中でないとファイル選択を開けないので、ここで直接 click する
+      if (act === "ok") { csvTargetId = accId; $("#csv-file").click(); }
+      done(null);
+    }
+  });
+}
+
+async function runCsvImport(file, accId) {
+  const a = acc(accId); if (!a) return;
+  let rows;
+  try { rows = parseCsv(await readCsvFile(file)); }
+  catch (e) { console.error(e); alertDialog("CSVを読み込めませんでした: " + e.message); return; }
+  if (!rows.length) { alertDialog("CSVに中身がありません"); return; }
+
+  let m = detectCsvColumns(rows, a), manual = false;
+  for (;;) {
+    if (!m) { m = await csvMappingDialog(rows, a); manual = true; if (!m) return; }
+    const recs = csvRecords(rows, m);
+    if (!recs.length) {
+      if (manual) { alertDialog("日付と金額を読み取れる行がありませんでした。\n選んだ列を確認してください。"); return; }
+      m = null; continue;   // 自動判定が外れた → 列を選んでもらう
+    }
+    const r = await csvPreviewDialog(a, csvCandidates(recs, a));
+    if (r === "remap") { m = null; continue; }
+    if (r) csvCommit(r);
+    return;
+  }
+}
+function csvCommit(picked) {
+  const offsetIds = state.categories.filter(c => c.offsetExpense).map(c => c.id);
+  const ids = [];
+  picked.forEach(c => {
+    const t = { id: uid(), date: c.date, name: c.tx.name, type: c.tx.type, categoryId: c.tx.categoryId,
+      amounts: c.tx.amounts, importId: c.importId };
+    // 割り勘カテゴリを選んだ場合は v4 の割り勘と同じ形にそろえる(元記録なし)
+    if (t.type === "income" && offsetIds.indexOf(t.categoryId) >= 0) { t.refTxId = null; t.offsetCategoryId = null; }
+    state.transactions.push(t);
+    ids.push(t.id);
+  });
+  persist();
+  viewMonth = picked.reduce((m, c) => c.date > m ? c.date : m, "").slice(0, 7);
+  render();
+  toast(`${ids.length}件を取り込みました`, { ms: 6000, actionLabel: "取り消し", onAction: () => {
+    const set = new Set(ids);
+    state.transactions = state.transactions.filter(t => !set.has(t.id));
+    persist(); render(); toast("取り込みを取り消しました");
+  } });
+}
+
 /* ---------------- イベント ---------------- */
 document.addEventListener("click", async e => {
   const el = e.target.closest("[data-action]");
@@ -2413,6 +2880,7 @@ document.addEventListener("click", async e => {
       state.settings.receiptRes = state.settings.receiptRes === "std" ? "high" : "std";
       persist(); renderSettings();
       break;
+    case "csv-import": csvStart(id); break;
     case "export": exportData(); break;
     case "import": $("#import-file").click(); break;
     case "reset": resetData(); break;
@@ -2420,6 +2888,10 @@ document.addEventListener("click", async e => {
 });
 $("#import-file").addEventListener("change", e => {
   if (e.target.files.length) importData(e.target.files[0]);
+  e.target.value = "";
+});
+$("#csv-file").addEventListener("change", e => {
+  if (e.target.files.length && csvTargetId) runCsvImport(e.target.files[0], csvTargetId);
   e.target.value = "";
 });
 $("#receipt-file").addEventListener("change", e => {
@@ -2430,9 +2902,14 @@ $("#receipt-file").addEventListener("change", e => {
 /* ---------------- 起動 ---------------- */
 showScreen("scr-home");
 
-// PWA: Service Worker登録(https配信時のみ)
-if ("serviceWorker" in navigator && location.protocol === "https:") {
+// PWA: Service Worker登録(https配信時と、動作確認用の localhost のみ)
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
   navigator.serviceWorker.register("./sw.js").catch(e => console.warn("SW登録失敗:", e));
+  // SW はキャッシュ済みの版を先に表示し、裏で最新版を取ってくる。新しい版が届いたら知らせる
+  navigator.serviceWorker.addEventListener("message", e => {
+    if (e.data && e.data.type === "app-updated")
+      toast("新しいバージョンがあります", { ms: 15000, actionLabel: "更新", onAction: () => location.reload() });
+  });
 }
 </script>
 </body>
