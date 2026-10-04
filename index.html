@@ -290,6 +290,21 @@
   .bfill { height:100%; max-width:100%; }
   .bf-warn { background:repeating-linear-gradient(-60deg, var(--red2) 0 8px, #a30018 8px 16px); }
   .bf-ok { background:var(--cyan); }
+  /* 貯金の推移 */
+  .sav-head { display:flex; justify-content:space-between; align-items:flex-end; gap:10px; margin-bottom:14px; }
+  .sav-head .t { font-size:11px; font-weight:900; color:var(--gray); }
+  .sav-head .v { font-size:22px; }
+  .sav-head .d { font-size:12px; font-weight:900; text-align:right; }
+  .sav-head .d small { display:block; font-size:9px; color:var(--gray); }
+  .sav-head .d.up { color:var(--cyan); } .sav-head .d.down { color:var(--red2); }
+  .sav-chart { display:flex; align-items:flex-end; gap:4px; height:110px; border-bottom:2px solid var(--white); }
+  .sav-col { flex:1; height:100%; display:flex; align-items:flex-end; background:none; border:none; padding:0; cursor:pointer; }
+  .sav-col .b { width:100%; min-height:2px; background:#3d3d3d;
+    clip-path:polygon(0 4px, 100% 0, 100% 100%, 0 100%); }
+  .sav-col.cur .b { background:var(--cyan); }
+  .sav-lbls { display:flex; gap:4px; margin-top:4px; }
+  .sav-lbls span { flex:1; text-align:center; font-size:9px; font-weight:900; color:var(--gray); white-space:nowrap; }
+  .sav-lbls span.cur { color:var(--white); }
 
   /* ===== 設定 ===== */
   .set-list { background:var(--panel); margin:0 2px 10px; clip-path:polygon(0 .6%, 100% 0, 99.6% 99.4%, .4% 100%); border-top:4px solid var(--red); }
@@ -464,7 +479,7 @@
 <script>
 "use strict";
 /* ================================================================
-   家計簿アプリ v4.1 — ペルソナ5スタイル
+   家計簿アプリ v4.2 — ペルソナ5スタイル
    - localStorage("kakeibo-data") / schemaVersion 6
    - エクスポート / インポートで引き継ぎ
    - APIキーだけは localStorage("kakeibo-apikey") に分離して保存する。
@@ -475,7 +490,7 @@ const SEED_DATA = null; // 公開版: 個人データは含めない
 
 const STORAGE_KEY = "kakeibo-data";
 const APIKEY_KEY = "kakeibo-apikey";
-const APP_VERSION = "4.1";
+const APP_VERSION = "4.2";
 const SCHEMA_VERSION = 6;
 
 // SEED_DATA が null の場合(公開版)の初期データ
@@ -1676,6 +1691,50 @@ function pctDiff(cur, prev) {
   const p = Math.round((cur - prev) / prev * 100);
   return (p >= 0 ? "+" : "−") + Math.abs(p) + "%";
 }
+/* 貯蓄口座の月末残高の合計。口座の「貯蓄」区分は今の設定を過去にも当てはめる */
+function savingsAtMonthEnd(yms) {
+  const ids = new Set(state.accounts.filter(a => a.kind !== "credit" && a.savings).map(a => a.id));
+  const base = state.accounts.filter(a => ids.has(a.id)).reduce((s, a) => s + (a.initialBalance || 0), 0);
+  const delta = {};
+  state.transactions.forEach(t => {
+    if (!t.date) return;
+    const ym = t.date.slice(0,7);
+    for (const k in t.amounts) if (ids.has(k)) delta[ym] = (delta[ym] || 0) + t.amounts[k];
+  });
+  const keys = Object.keys(delta);
+  return yms.map(ym => keys.reduce((s, k) => k <= ym ? s + delta[k] : s, base));
+}
+function savingsTrendHtml() {
+  if (!state.accounts.some(a => a.kind !== "credit" && a.savings))
+    return `<div class="empty">貯蓄の口座がありません<br>設定 → 口座の ✎ で区分を「貯蓄」にすると、ここに推移が出ます</div>`;
+  // 表示中の月から最大12か月さかのぼる。記録が始まる前の月は出さない
+  const first = state.transactions.reduce((m, t) => t.date && t.date < m ? t.date : m, viewMonth + "-99").slice(0,7);
+  const yms = [viewMonth];
+  while (yms.length < 12 && yms[0] > first) yms.unshift(prevMonth(yms[0]));
+  const vals = savingsAtMonthEnd([prevMonth(yms[0]), ...yms]);
+  const before = vals.shift();
+  const cur = vals[vals.length - 1];
+  const diff = cur - (vals.length > 1 ? vals[vals.length - 2] : before);
+  const maxV = Math.max(1, ...vals);
+  const m = Number(viewMonth.slice(5,7));
+  const cols = yms.map((ym, i) => {
+    const h = Math.max(0, Math.round(vals[i] / maxV * 100));
+    return `<button class="sav-col ${ym === viewMonth ? "cur" : ""}" data-action="sav-month" data-ym="${ym}"
+      title="${Number(ym.slice(0,4))}年${Number(ym.slice(5,7))}月末 ${vals[i] < 0 ? "−" : ""}${yen(vals[i])}"><div class="b" style="height:${h}%"></div></button>`;
+  }).join("");
+  // 1月と左端だけ年を添える(年をまたいだときに分かるように)
+  const lbls = yms.map((ym, i) => {
+    const mm = Number(ym.slice(5,7));
+    return `<span class="${ym === viewMonth ? "cur" : ""}">${i === 0 || mm === 1 ? `'${ym.slice(2,4)}/` : ""}${mm}月</span>`;
+  }).join("");
+  return `<div class="sav-head">
+      <div><div class="t">${m}月末の貯金</div><div class="v num">${cur < 0 ? "−" : ""}${yen(cur)}</div></div>
+      <div class="d num ${diff > 0 ? "up" : diff < 0 ? "down" : ""}"><small>先月から</small>${diff > 0 ? "+" : diff < 0 ? "−" : "±"}${yen(diff)}</div>
+    </div>
+    <div class="sav-chart">${cols}</div>
+    <div class="sav-lbls">${lbls}</div>
+    <div class="hint">※ 区分が「貯蓄」の口座の月末残高の合計です。棒をタップするとその月に切り替わります。</div>`;
+}
 function renderAnalysis() {
   const sum = monthSummary(viewMonth);
   const prev = monthSummary(prevMonth(viewMonth));
@@ -1713,6 +1772,8 @@ function renderAnalysis() {
       <div class="kpi"><div class="t en">支出 EXPENSE</div><div class="v num" style="color:var(--red2)">${yen(sum.exp)}</div><div class="d">先月比 ${pctDiff(sum.exp, prev.exp)}</div></div>
       <div class="kpi"><div class="t en">収入 INCOME</div><div class="v num" style="color:var(--cyan)">${yen(sum.inc)}</div><div class="d">先月比 ${pctDiff(sum.inc, prev.inc)}</div></div>
     </div>
+    <div class="sec-head">${ransomHtml("貯金の推移")}<div class="en">SAVINGS</div></div>
+    <div class="panel">${savingsTrendHtml()}</div>
     <div class="sec-head">${ransomHtml("カテゴリ別")}<div class="en">BY CATEGORY</div></div>
     <div class="panel">${bars || '<div class="empty">この月の支出はありません</div>'}</div>
     <div class="sec-head">${ransomHtml("予算")}<div class="en">BUDGET STATUS</div></div>
@@ -2714,6 +2775,7 @@ document.addEventListener("click", async e => {
     case "nav": showScreen(el.dataset.scr); break;
     case "month-prev": shiftMonth(-1); break;
     case "month-next": shiftMonth(1); break;
+    case "sav-month": viewMonth = el.dataset.ym; render(); break;
     case "toast-act": { const f = toast._act; hideToast(); if (f) f(); break; }
     /* --- クイック入力 --- */
     case "quick-charge":

@@ -2,7 +2,7 @@
 // v4.1: キャッシュ優先で即起動 + 裏で最新を取得(stale-while-revalidate)。
 // v4.0 はネットワーク優先だったため、電波が弱いと fetch がタイムアウトするまで
 // 画面が真っ白のまま待たされていた。
-const CACHE = "kakeibo-v4.1";
+const CACHE = "kakeibo-v4.2";
 const FONT_CACHE = "kakeibo-fonts";   // フォントは版をまたいで使い回す
 const ASSETS = ["./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 const FONT_HOSTS = ["fonts.googleapis.com", "fonts.gstatic.com"];
